@@ -508,10 +508,67 @@ async fn check_url(url: &str) -> CheckResult {
     }
 }
 
+// 检查 PowerShell 7 是否已安装
+fn check_pwsh_installed() -> bool {
+    let output = hidden_command("pwsh")
+        .args(["-Command", "exit 0"])
+        .output();
+    
+    match output {
+        Ok(o) => o.status.success(),
+        Err(_) => false,
+    }
+}
+
+// 安装 PowerShell 7
+fn install_pwsh() -> Result<(), String> {
+    let output = hidden_command("winget")
+        .args([
+            "install",
+            "--id",
+            "Microsoft.PowerShell",
+            "--source",
+            "winget",
+            "--accept-source-agreements",
+            "--accept-package-agreements",
+            "--silent"
+        ])
+        .output()
+        .map_err(|e| format!("启动安装失败: {}", e))?;
+    
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        Err(format!("安装 PowerShell 7 失败: {}", stderr))
+    }
+}
+
 // 运行登录脚本
 #[tauri::command]
 async fn run_login_script(app: AppHandle) -> Result<String, String> {
     use tauri_plugin_shell::ShellExt;
+    
+    // 检查 PowerShell 7 是否已安装
+    if !check_pwsh_installed() {
+        // 提示用户安装 PowerShell 7
+        let install_result = tokio::task::spawn_blocking(|| {
+            install_pwsh()
+        }).await;
+        
+        match install_result {
+            Ok(Ok(())) => {
+                // 安装成功，等待一下让环境变量生效
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
+            Ok(Err(e)) => {
+                return Err(format!("{}。请手动安装: winget install Microsoft.PowerShell", e));
+            }
+            Err(e) => {
+                return Err(format!("安装过程出错: {}", e));
+            }
+        }
+    }
     
     // 获取 exe 目录
     let exe_dir = std::env::current_exe()
@@ -538,8 +595,11 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     
     let script_path_str = script_path.to_string_lossy().to_string();
     
-    // 使用可见的 PowerShell 窗口执行脚本（用户可能需要输入账号密码）
+    // 使用可见的 PowerShell 7 窗口执行脚本（用户可能需要输入账号密码）
     // start 命令会打开新窗口，/wait 等待脚本完成
+    // 优先使用 pwsh (PowerShell 7)，如果不存在则使用 powershell (PowerShell 5)
+    let ps_cmd = if check_pwsh_installed() { "pwsh" } else { "powershell" };
+    
     let shell = app.shell();
     let output = shell
         .command("cmd")
@@ -547,7 +607,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             "/c",
             "start",
             "/wait",
-            "powershell",
+            ps_cmd,
             "-NoExit",           // 脚本执行完后不关闭窗口，让用户看到输出
             "-ExecutionPolicy",
             "Bypass",
