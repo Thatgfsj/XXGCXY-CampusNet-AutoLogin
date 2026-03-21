@@ -32,21 +32,8 @@
 
 程序会在 WiFi 连接但无法访问互联网时，自动执行 `xywdl.ps1` 登录脚本。
 
-请确保登录脚本 `xywdl.ps1` 包含以下内容：
-- 您的校园网账号
-- 您的校园网密码
-- 登录接口的 URL
-
-**示例脚本结构：**
-```powershell
-# 校园网登录脚本
-$username = "your_username"
-$password = "your_password"
-$loginUrl = "http://your-campus-portal/login"
-
-# 执行登录请求
-# ... 登录逻辑
-```
+如何使用请看https://www.bilibili.com/opus/1174460821448687621
+或者https://github.com/Thatgfsj/XXGC-CampusNet-AutoLogin
 
 ### 日常使用
 
