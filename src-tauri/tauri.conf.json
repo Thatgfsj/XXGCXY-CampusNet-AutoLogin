@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "xxgcxy-wifi",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "identifier": "com.xxgcxy.wifi",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -38,6 +38,7 @@
     ],
     "resources": [
       "../xywdl.ps1",
+      "../xywdl.bat",
       "bin/_pw7_/**/*"
     ],
     "windows": {

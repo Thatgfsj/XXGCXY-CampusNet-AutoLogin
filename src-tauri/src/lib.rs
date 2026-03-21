@@ -575,49 +575,27 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
         .map(|p| p.parent().unwrap_or(std::path::Path::new(".")).to_path_buf())
         .unwrap_or_else(|_| PathBuf::from("."));
     
-    // 尝试多个可能的脚本路径
-    let possible_paths: Vec<PathBuf> = vec![
+    // 尝试多个可能的 bat 脚本路径
+    let possible_bat_paths: Vec<PathBuf> = vec![
         // 1. exe 同目录
-        exe_dir.join("xywdl.ps1"),
+        exe_dir.join("xywdl.bat"),
         // 2. exe 目录下的 _up_ 子目录（MSI 安装后的位置）
-        exe_dir.join("_up_").join("xywdl.ps1"),
+        exe_dir.join("_up_").join("xywdl.bat"),
         // 3. 资源目录
-        app.path().resource_dir().map(|p| p.join("xywdl.ps1")).unwrap_or_default(),
+        app.path().resource_dir().map(|p| p.join("xywdl.bat")).unwrap_or_default(),
         // 4. 当前工作目录
-        std::env::current_dir().map(|p| p.join("xywdl.ps1")).unwrap_or_default(),
+        std::env::current_dir().map(|p| p.join("xywdl.bat")).unwrap_or_default(),
     ];
     
-    // 查找存在的脚本路径
-    let script_path = possible_paths
+    // 查找存在的 bat 脚本路径
+    let bat_path = possible_bat_paths
         .into_iter()
         .find(|p| p.exists())
         .ok_or_else(|| format!("登录脚本不存在 (exe目录: {})", exe_dir.display()))?;
     
-    let script_path_str = script_path.to_string_lossy().to_string();
+    let bat_path_str = bat_path.to_string_lossy().to_string();
     
-    // 查找打包的 PowerShell 7 便携版
-    let bundled_pwsh_paths: Vec<PathBuf> = vec![
-        exe_dir.join("_pw7_").join("pwsh.exe"),
-        exe_dir.join("bin").join("_pw7_").join("pwsh.exe"),
-    ];
-    
-    let bundled_pwsh = bundled_pwsh_paths
-        .into_iter()
-        .find(|p| p.exists());
-    
-    // 使用可见的 PowerShell 窗口执行脚本（用户可能需要输入账号密码）
-    // 优先使用打包的 PowerShell 7，其次使用系统的 pwsh，最后使用 powershell
-    let ps_cmd: String = match bundled_pwsh {
-        Some(ref path) => path.to_string_lossy().to_string(),
-        None => {
-            if check_pwsh_installed() { 
-                "pwsh".to_string() 
-            } else { 
-                "powershell".to_string() 
-            }
-        }
-    };
-    
+    // 使用可见窗口运行 bat 脚本（bat 会调用 pw7 运行 ps1）
     let shell = app.shell();
     let output = shell
         .command("cmd")
@@ -625,11 +603,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             "/c",
             "start",
             "/wait",
-            &ps_cmd,
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            &script_path_str
+            &bat_path_str
         ])
         .output()
         .await
