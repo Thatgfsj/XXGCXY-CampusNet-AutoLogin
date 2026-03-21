@@ -626,7 +626,6 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             "start",
             "/wait",
             &ps_cmd,
-            "-NoExit",           // 脚本执行完后不关闭窗口，让用户看到输出
             "-ExecutionPolicy",
             "Bypass",
             "-File",
