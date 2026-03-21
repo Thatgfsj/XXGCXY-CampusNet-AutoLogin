@@ -538,11 +538,22 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     
     let script_path_str = script_path.to_string_lossy().to_string();
     
-    // 使用 PowerShell 执行脚本
+    // 使用可见的 PowerShell 窗口执行脚本（用户可能需要输入账号密码）
+    // start 命令会打开新窗口，/wait 等待脚本完成
     let shell = app.shell();
     let output = shell
-        .command("powershell")
-        .args(["-ExecutionPolicy", "Bypass", "-File", &script_path_str])
+        .command("cmd")
+        .args([
+            "/c",
+            "start",
+            "/wait",
+            "powershell",
+            "-NoExit",           // 脚本执行完后不关闭窗口，让用户看到输出
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            &script_path_str
+        ])
         .output()
         .await
         .map_err(|e| format!("执行登录脚本失败: {}", e))?;
