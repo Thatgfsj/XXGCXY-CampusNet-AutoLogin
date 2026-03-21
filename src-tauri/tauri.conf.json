@@ -48,7 +48,9 @@
       },
       "nsis": {
         "languages": ["SimpChinese"],
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installMode": "currentUser",
+        "installerHooks": "./nsis/installer.nsi"
       }
     }
   },
