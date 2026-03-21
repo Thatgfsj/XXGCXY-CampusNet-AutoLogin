@@ -578,32 +578,57 @@
         
         // 重新连接WiFi
         async function reconnectWifi() {
-            try {
-                if (config.primary_ssid) {
-                    addLog('正在连接主网络: ' + config.primary_ssid);
+            let connectedSsid = null;
+            
+            // 尝试连接主网络
+            if (config.primary_ssid) {
+                addLog('正在连接主网络: ' + config.primary_ssid);
+                try {
                     await invoke('connect_wifi', { ssid: config.primary_ssid });
-                    await sleep(3000);
+                    await sleep(4000);  // 等待连接完成
                     
-                    // 连接后立即尝试登录
-                    addLog('WiFi已连接，正在登录校园网...');
-                    await runLoginScript();
-                } else {
-                    addLog('未配置主网络');
-                }
-            } catch (e) {
-                addLog('连接WiFi失败: ' + e);
-                // 尝试备用网络
-                if (config.backup_ssid) {
-                    addLog('尝试备用网络: ' + config.backup_ssid);
-                    try {
-                        await invoke('connect_wifi', { ssid: config.backup_ssid });
-                        await sleep(3000);
-                        addLog('WiFi已连接，正在登录校园网...');
-                        await runLoginScript();
-                    } catch (e2) {
-                        addLog('连接备用网络失败: ' + e2);
+                    // 检查是否真的连接上了
+                    const status = await invoke('check_network');
+                    if (status.wifi_connected === config.primary_ssid) {
+                        addLog('已连接到: ' + config.primary_ssid);
+                        connectedSsid = config.primary_ssid;
                     }
+                } catch (e) {
+                    addLog('连接主网络失败: ' + e);
                 }
+            } else {
+                addLog('未配置主网络');
+            }
+            
+            // 如果主网络没连上，尝试备用网络
+            if (!connectedSsid && config.backup_ssid) {
+                addLog('尝试备用网络: ' + config.backup_ssid);
+                try {
+                    await invoke('connect_wifi', { ssid: config.backup_ssid });
+                    await sleep(4000);
+                    
+                    const status = await invoke('check_network');
+                    if (status.wifi_connected === config.backup_ssid) {
+                        addLog('已连接到: ' + config.backup_ssid);
+                        connectedSsid = config.backup_ssid;
+                    }
+                } catch (e) {
+                    addLog('连接备用网络失败: ' + e);
+                }
+            }
+            
+            // 只有确认WiFi连接成功后，才尝试登录
+            if (connectedSsid) {
+                addLog('WiFi已连接，检查网络状态...');
+                const status = await invoke('check_network');
+                if (status.needs_login) {
+                    addLog('需要登录校园网，正在执行登录...');
+                    await runLoginScript();
+                } else if (status.internet_ok) {
+                    addLog('网络正常，无需登录');
+                }
+            } else {
+                addLog('WiFi连接失败，请检查网络设置');
             }
         }
         
