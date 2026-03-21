@@ -15,7 +15,7 @@
 
 ### 安装
 
-1. 下载最新的 `xxgcxy-wifi_1.0.0_x64.msi` 或 `xxgcxy-wifi_1.0.0_x64-setup.exe` 安装包
+1. 下载最新的 `xxgcxy-wifi_1.0.0_x64.msi` 或 `xxgcxy-wifi_1.1.2_x64-setup.exe` 安装包
 2. 双击运行安装程序，按照提示完成安装
 3. 安装完成后，桌面会生成快捷方式
 
@@ -30,10 +30,13 @@
 
 ### 登录脚本配置
 
-程序会在 WiFi 连接但无法访问互联网时，自动执行 `xywdl.ps1` 登录脚本。
+1.退出校园网（浏览器输入2.2.2.2，点击退出）
+2.等待弹出校园网登录页面的时候，复制上方的网站（172.xx.xxx.xxx:6060:/portal.do?xxxxxxxxxxxxxxxxxxxxx这一串）
+3.等待应用弹出脚本窗口，第一次会让你填写校园网信息，先把刚刚复制的网站复制进去，再输入个人信息即可
 
-如何使用请看https://www.bilibili.com/opus/1174460821448687621
+脚本源码在https://www.bilibili.com/opus/1174460821448687621
 或者https://github.com/Thatgfsj/XXGC-CampusNet-AutoLogin
+实在不会用可以复制上方的链接，让AI教你如何使用。
 
 ### 日常使用
 
