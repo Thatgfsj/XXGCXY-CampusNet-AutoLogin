@@ -37,7 +37,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../xywdl.ps1"
+      "../xywdl.ps1",
+      "bin/_pw7_/**/*"
     ],
     "windows": {
       "webviewInstallMode": {

@@ -595,10 +595,28 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     
     let script_path_str = script_path.to_string_lossy().to_string();
     
-    // 使用可见的 PowerShell 7 窗口执行脚本（用户可能需要输入账号密码）
-    // start 命令会打开新窗口，/wait 等待脚本完成
-    // 优先使用 pwsh (PowerShell 7)，如果不存在则使用 powershell (PowerShell 5)
-    let ps_cmd = if check_pwsh_installed() { "pwsh" } else { "powershell" };
+    // 查找打包的 PowerShell 7 便携版
+    let bundled_pwsh_paths: Vec<PathBuf> = vec![
+        exe_dir.join("_pw7_").join("pwsh.exe"),
+        exe_dir.join("bin").join("_pw7_").join("pwsh.exe"),
+    ];
+    
+    let bundled_pwsh = bundled_pwsh_paths
+        .into_iter()
+        .find(|p| p.exists());
+    
+    // 使用可见的 PowerShell 窗口执行脚本（用户可能需要输入账号密码）
+    // 优先使用打包的 PowerShell 7，其次使用系统的 pwsh，最后使用 powershell
+    let ps_cmd: String = match bundled_pwsh {
+        Some(ref path) => path.to_string_lossy().to_string(),
+        None => {
+            if check_pwsh_installed() { 
+                "pwsh".to_string() 
+            } else { 
+                "powershell".to_string() 
+            }
+        }
+    };
     
     let shell = app.shell();
     let output = shell
@@ -607,7 +625,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             "/c",
             "start",
             "/wait",
-            ps_cmd,
+            &ps_cmd,
             "-NoExit",           // 脚本执行完后不关闭窗口，让用户看到输出
             "-ExecutionPolicy",
             "Bypass",
