@@ -595,16 +595,12 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     
     let bat_path_str = bat_path.to_string_lossy().to_string();
     
-    // 使用可见窗口运行 bat 脚本（bat 会调用 pw7 运行 ps1）
+    // 使用 start 打开可见窗口运行 bat 脚本
+    // bat 会在成功时自动关闭窗口，失败时暂停等待用户按键
     let shell = app.shell();
     let output = shell
         .command("cmd")
-        .args([
-            "/c",
-            "start",
-            "/wait",
-            &bat_path_str
-        ])
+        .args(["/c", "start", "/wait", &bat_path_str])
         .output()
         .await
         .map_err(|e| format!("执行登录脚本失败: {}", e))?;
