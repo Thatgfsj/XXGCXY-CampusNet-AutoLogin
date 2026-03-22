@@ -270,7 +270,7 @@ class AuthenticationClient {
             Write-Host "4. 复制浏览器地址栏中的完整URL地址（例：172.xxxxxxxx这个网站链接）" -ForegroundColor Gray
             Write-Host "5. 将URL粘贴到下面" -ForegroundColor Gray
 
-            $manualUrl = Read-Host "`n请粘贴重定向URL"
+            $manualUrl = Read-Host "`n请粘贴校园网登录链接："
             while ([string]::IsNullOrWhiteSpace($manualUrl) -or $manualUrl -notmatch '^http://' -or $manualUrl -notmatch '/portal\.do') {
                 Write-Host "URL格式不正确，请输入包含 /portal.do 的重定向URL" -ForegroundColor Red
                 $manualUrl = Read-Host "请重新粘贴重定向URL"
