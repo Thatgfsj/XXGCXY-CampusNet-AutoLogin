@@ -1,6 +1,7 @@
 # XXGCXY-CampusNet-AutoLogin
 
 校园网自动登录助手 - 一个基于 Tauri 2.x 开发的 Windows 桌面应用，用于自动检测和重连校园网 WiFi，并执行自动登录脚本。
+本项目内置 PowerShell 7 便携版（来源：https://github.com/PowerShell/PowerShell），PowerShell 7 遵循 MIT 开源协议，本项目对其的使用符合该协议要求。
 
 ## 功能特性
 
