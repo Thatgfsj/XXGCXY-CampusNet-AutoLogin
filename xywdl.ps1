@@ -1,9 +1,3 @@
-﻿if ($PSVersionTable.PSVersion.Major -lt 5 -or ($PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -lt 1)) {
-    Write-Host "错误：本脚本需要PowerShell 5.1或更高版本。" -ForegroundColor Red
-    Read-Host "按Enter退出"
-    exit 1
-}
-
 class NetworkConfig {
     [string] $BaseURL
     [string] $WlanAcName
@@ -270,10 +264,10 @@ class AuthenticationClient {
             $this.DisplayNetworkInfo()
         } else {
             Write-Host "`n请按以下步骤操作：" -ForegroundColor White
-            Write-Host "1. 断开当前Wi-Fi重新连接" -ForegroundColor Gray
+            Write-Host "1. 连接校园网（如果已经登录登录2.2.2.2来退出）" -ForegroundColor Gray
             Write-Host "2. 打开浏览器访问任意网站（如 www.qq.com）" -ForegroundColor Gray
             Write-Host "3. 浏览器会自动重定向到登录页面" -ForegroundColor Gray
-            Write-Host "4. 复制浏览器地址栏中的完整URL地址" -ForegroundColor Gray
+            Write-Host "4. 复制浏览器地址栏中的完整URL地址（例：172.xxxxxxxx这个网站链接）" -ForegroundColor Gray
             Write-Host "5. 将URL粘贴到下面" -ForegroundColor Gray
 
             $manualUrl = Read-Host "`n请粘贴重定向URL"
