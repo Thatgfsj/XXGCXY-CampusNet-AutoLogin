@@ -161,3 +161,5 @@ MIT License
 ---
 
 如有问题或建议，欢迎提交 [Issue](https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin/issues)
+
+声明：本脚本所有经验仅供自动化协议学习研究，请遵守各高校管理相关要求。
