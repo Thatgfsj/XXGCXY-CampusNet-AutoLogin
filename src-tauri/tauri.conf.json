@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis", "msi", "deb"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,8 +39,17 @@
     "resources": [
       "../xywdl.ps1",
       "../xywdl.bat",
+      "../xywdl.sh",
       "bin/_pw7_/**/*"
     ],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      },
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "nmcli"]
+      }
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"

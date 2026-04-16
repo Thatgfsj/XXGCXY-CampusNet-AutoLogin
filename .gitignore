@@ -22,3 +22,9 @@ config.json
 # Temp files
 *.tmp
 *.temp
+
+# Binary
+campus-wifi.exe
+
+# Windows pwsh bundle
+src-tauri/bin/
