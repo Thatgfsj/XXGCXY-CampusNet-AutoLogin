@@ -60,8 +60,7 @@
         "languages": ["SimpChinese"],
         "displayLanguageSelector": false,
         "installMode": "currentUser",
-        "installerHooks": "./nsis/installer.nsi",
-        "resources": ["bin/_pw7_/**/*"]
+        "installerHooks": "./nsis/installer.nsi"
       }
     }
   },
