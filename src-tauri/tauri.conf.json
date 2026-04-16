@@ -46,7 +46,11 @@
         "bundleMediaFramework": false
       },
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "network-manager"]
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "network-manager"],
+        "desktop": {
+          "categories": ["Network"],
+          "icon": ["icons/128x128.png"]
+        }
       }
     },
     "windows": {
