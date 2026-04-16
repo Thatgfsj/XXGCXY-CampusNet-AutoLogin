@@ -25,3 +25,6 @@ config.json
 
 # Binary
 campus-wifi.exe
+
+# Windows pwsh bundle
+src-tauri/bin/
