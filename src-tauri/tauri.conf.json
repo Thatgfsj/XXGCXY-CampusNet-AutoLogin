@@ -39,8 +39,7 @@
     "resources": [
       "../xywdl.ps1",
       "../xywdl.bat",
-      "../xywdl.sh",
-      "bin/_pw7_/**/*"
+      "../xywdl.sh"
     ],
     "linux": {
       "appimage": {
@@ -61,7 +60,8 @@
         "languages": ["SimpChinese"],
         "displayLanguageSelector": false,
         "installMode": "currentUser",
-        "installerHooks": "./nsis/installer.nsi"
+        "installerHooks": "./nsis/installer.nsi",
+        "resources": ["bin/_pw7_/**/*"]
       }
     }
   },
