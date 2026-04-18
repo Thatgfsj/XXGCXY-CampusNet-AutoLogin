@@ -40,7 +40,10 @@ jobs:
           npx tauri --version
           npx tauri build --help | head -20
       - name: Build Tauri
-        run: npx tauri build --bundles deb
+        run: |
+          echo "=== Tauri Build Debug ==="
+          npx tauri build --bundles deb 2>&1 | head -100
+          echo "=== Exit code: $? ==="
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
