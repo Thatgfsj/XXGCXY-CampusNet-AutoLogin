@@ -35,6 +35,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
+      - name: Check Tauri CLI
+        run: |
+          npx tauri --version
+          npx tauri build --help | head -20
       - name: Build Tauri
         run: npx tauri build --bundles deb
       - name: Upload Linux Artifact
