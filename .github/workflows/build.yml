@@ -45,7 +45,6 @@ jobs:
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: false
           prerelease: false
-          args: --bundles deb
 
   build-windows:
     runs-on: windows-latest
@@ -71,4 +70,3 @@ jobs:
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: false
           prerelease: false
-          args: --bundles nsis,msi
