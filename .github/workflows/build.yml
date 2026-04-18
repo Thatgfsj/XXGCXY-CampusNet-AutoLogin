@@ -44,11 +44,7 @@ jobs:
           echo "=== Tauri Build Debug ==="
           npx tauri build --bundles deb 2>&1 | head -100
           echo "=== Exit code: $? ==="
-      - name: Upload Linux Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-deb
-          path: src-tauri/target/release/bundle/deb/*.deb
+          ls -la src-tauri/target/release/bundle/deb/ || echo "No deb folder"
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
