@@ -61,23 +61,6 @@ jobs:
         run: npm ci
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Download PowerShell 7 portable
-        shell: pwsh
-        run: |
-          $pw7Dir = "${{ github.workspace }}\src-tauri\bin\_pw7_"
-          New-Item -ItemType Directory -Path $pw7Dir -Force | Out-Null
-          $zipPath = "$pw7Dir\pwsh.zip"
-          $url = "https://github.com/PowerShell/PowerShell/releases/download/v7.4.4/PowerShell-7.4.4-win-x64.zip"
-          Write-Host "Downloading PowerShell 7..."
-          Invoke-WebRequest -Uri $url -OutFile $zipPath
-          Write-Host "Extracting PowerShell 7..."
-          Expand-Archive -Path $zipPath -DestinationPath $pw7Dir -Force
-          # Move contents up one level so pwsh.exe is at _pw7_/pwsh.exe
-          Get-ChildItem -Path "$pw7Dir\PowerShell-7.4.4-win-x64" | Move-Item -Destination $pw7Dir -Force
-          Remove-Item "$pw7Dir\PowerShell-7.4.4-win-x64" -Recurse -Force
-          Remove-Item $zipPath -Force
-          Write-Host "PowerShell 7 installed to $pw7Dir"
-          Get-ChildItem $pw7Dir
       - name: Build Tauri (Windows)
         uses: tauri-apps/tauri-action@v0
         env:

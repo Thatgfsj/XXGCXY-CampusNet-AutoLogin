@@ -14,11 +14,21 @@
 
 ## 安装
 
-1. 下载最新的 `xxgcxy-wifi_x.x.x_x64.msi` 或 `xxgcxy-wifi_x.x.x_x64-setup.exe` 安装包
+### Windows 安装包（推荐）
+
+1. 下载最新的 `xxgcxy-wifi_x.x.x_x64-setup.exe` 安装包
 2. 双击运行安装程序，按照提示完成安装
 3. 安装完成后，桌面会生成快捷方式
 
 > **注意**：安装包已内置 PowerShell 7，无需额外安装或网络连接。
+
+### Windows 便携版
+
+下载 `xxgcxy-wifi.exe` 独立运行程序（不包含 PowerShell 7，需确保系统已安装 PowerShell 7）。
+
+### Linux
+
+下载并运行 `xywdl.sh` 脚本（需要系统已安装 PowerShell 7 或 pwsh）。
 
 ## 技术架构
 
@@ -52,10 +62,11 @@ xxgcxy-wifi/
 ├── package.json            # Node.js 依赖配置
 ├── xywdl.ps1               # 校园网登录脚本
 ├── xywdl.bat               # Windows 启动器
+├── xywdl.sh                # Linux 启动脚本
 ├── src-tauri/              # Tauri 后端目录
 │   ├── Cargo.toml          # Rust 依赖配置
 │   ├── tauri.conf.json     # Tauri 配置
-│   ├── bin/_pw7_/          # 内置 PowerShell 7（CI 自动下载）
+│   ├── bin/_pw7_/          # 内置 PowerShell 7 便携版
 │   └── src/
 │       ├── lib.rs          # 主要业务逻辑
 │       └── main.rs         # 程序入口
@@ -68,7 +79,7 @@ xxgcxy-wifi/
 
 - Rust 1.70+
 - Node.js 18+
-- Windows 10/11
+- Windows 10/11 或 Linux
 
 ### 构建步骤
 
@@ -83,9 +94,14 @@ npm run tauri dev
 npm run tauri build
 ```
 
-> **Windows 构建说明**：CI 构建流程会自动下载 PowerShell 7 便携版到 `src-tauri/bin/_pw7_/` 并打包进安装包。本地构建时如无 PS7，登录脚本将回退使用系统 `powershell`。
+> **Windows 构建说明**：PowerShell 7 便携版已内置在 `src-tauri/bin/_pw7_/`，会自动打包进安装包。登录脚本会优先使用内置 PS7，如找不到则回退使用系统 `powershell`。
 
-构建产物位于 `src-tauri/target/release/bundle/` 目录。
+### 构建产物
+
+- **Windows 安装包**: `src-tauri/target/release/bundle/nsis/xxgcxy-wifi_x.x.x_x64-setup.exe`
+- **Windows MSI**: `src-tauri/target/release/bundle/msi/xxgcxy-wifi_x.x.x_x64.msi`
+- **Windows 独立程序**: `src-tauri/target/release/xxgcxy-wifi.exe`
+- **Linux DEB**: `src-tauri/target/release/bundle/deb/xxgcxy-wifi_x.x.x_amd64.deb`
 
 ## 首次配置
 

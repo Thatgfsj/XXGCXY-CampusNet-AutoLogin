@@ -26,5 +26,6 @@ config.json
 # Binary
 campus-wifi.exe
 
-# Windows pwsh bundle
-src-tauri/bin/
+# Windows pwsh bundle - PS7 portable is committed to src-tauri/bin/_pw7_/
+# Ignore unpacked/build artifacts but not the committed PS7
+src-tauri/bin/_pw7_.unpacked/
