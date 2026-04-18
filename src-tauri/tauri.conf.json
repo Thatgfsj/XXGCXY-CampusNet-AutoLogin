@@ -39,8 +39,7 @@
     "resources": [
       "../xywdl.ps1",
       "../xywdl.bat",
-      "../xywdl.sh",
-      "bin/_pw7_/"
+      "../xywdl.sh"
     ],
     "linux": {
       "appimage": {
