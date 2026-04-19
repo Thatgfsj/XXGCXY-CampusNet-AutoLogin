@@ -8,7 +8,7 @@ REM ============================================
 set "SCRIPT_DIR=%~dp0"
 set "PS_SCRIPT=%SCRIPT_DIR%xywdl.ps1"
 set "PW7_PATH="
-set "PS_VERSION="
+set "PW7_DIR="
 
 REM 去除路径末尾的空格和反斜杠（如果有）
 for %%a in ("%SCRIPT_DIR%") do set "SCRIPT_DIR=%%~fa"
@@ -27,18 +27,34 @@ if not exist "%PS_SCRIPT%" (
 )
 
 REM 查找 PowerShell 7 便携版
-if exist "%SCRIPT_DIR%\_pw7_\pwsh.exe" set "PW7_PATH=%SCRIPT_DIR%\_pw7_\pwsh.exe"
-if not defined PW7_PATH if exist "%SCRIPT_DIR%\..\bin\_pw7_\pwsh.exe" set "PW7_PATH=%SCRIPT_DIR%\..\bin\_pw7_\pwsh.exe"
-if not defined PW7_PATH if exist "%SCRIPT_DIR%\..\_pw7_\pwsh.exe" set "PW7_PATH=%SCRIPT_DIR%\..\_pw7_\pwsh.exe"
-if not defined PW7_PATH if exist "%SCRIPT_DIR%\bin\_pw7_\pwsh.exe" set "PW7_PATH=%SCRIPT_DIR%\bin\_pw7_\pwsh.exe"
+if exist "%SCRIPT_DIR%\_pw7_\pwsh.exe" (
+    set "PW7_PATH=%SCRIPT_DIR%\_pw7_\pwsh.exe"
+    set "PW7_DIR=%SCRIPT_DIR%\_pw7_"
+)
+if not defined PW7_PATH if exist "%SCRIPT_DIR%\..\bin\_pw7_\pwsh.exe" (
+    set "PW7_PATH=%SCRIPT_DIR%\..\bin\_pw7_\pwsh.exe"
+    for %%a in ("%PW7_PATH%") do set "PW7_DIR=%%~dpa"
+    set "PW7_DIR=%PW7_DIR:~0,-1%"
+)
+if not defined PW7_PATH if exist "%SCRIPT_DIR%\..\_pw7_\pwsh.exe" (
+    set "PW7_PATH=%SCRIPT_DIR%\..\_pw7_\pwsh.exe"
+    for %%a in ("%PW7_PATH%") do set "PW7_DIR=%%~dpa"
+    set "PW7_DIR=%PW7_DIR:~0,-1%"
+)
+if not defined PW7_PATH if exist "%SCRIPT_DIR%\bin\_pw7_\pwsh.exe" (
+    set "PW7_PATH=%SCRIPT_DIR%\bin\_pw7_\pwsh.exe"
+    set "PW7_DIR=%SCRIPT_DIR%\bin\_pw7_
+)
 
 REM 如果找到 PowerShell 7，验证版本
 if defined PW7_PATH (
     echo [信息] 找到 PowerShell 7: %PW7_PATH%
+    echo [信息] PowerShell 目录: %PW7_DIR%
     "%PW7_PATH%" -Command "$PSVersionTable.PSVersion.ToString()" >nul 2>&1
     if errorlevel 1 (
         echo [警告] PowerShell 7 无法执行，将尝试其他版本
         set "PW7_PATH="
+        set "PW7_DIR="
     ) else (
         echo [信息] 使用 PowerShell 7
     )
@@ -50,26 +66,36 @@ if not defined PW7_PATH (
     if %errorlevel%==0 (
         echo [信息] 使用系统 PowerShell 7 (pwsh)
         set "PW7_PATH=pwsh"
+        set "PW7_DIR="
     )
 )
 
 REM 执行 PowerShell 脚本
 if defined PW7_PATH (
-    if "%PW7_PATH%"=="pwsh" (
-        echo [执行] pwsh -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
-        pwsh -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
-    ) else (
+    if defined PW7_DIR (
+        REM 切换到 PowerShell 目录运行，以确保能找到模块
+        pushd %PW7_DIR%
         echo [执行] "%PW7_PATH%" -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
         "%PW7_PATH%" -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+        set "EXIT_CODE=%errorlevel%"
+        popd
+    ) else (
+        if "%PW7_PATH%"=="pwsh" (
+            echo [执行] pwsh -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+            pwsh -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+        ) else (
+            echo [执行] "%PW7_PATH%" -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+            "%PW7_PATH%" -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+        )
+        set "EXIT_CODE=%errorlevel%"
     )
 ) else (
     REM 回退到 Windows PowerShell 5.x
     echo [信息] 未找到 PowerShell 7，使用系统 PowerShell
     echo [执行] powershell -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
     powershell -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+    set "EXIT_CODE=%errorlevel%"
 )
-
-set "EXIT_CODE=%errorlevel%"
 
 if %EXIT_CODE% neq 0 (
     echo.
