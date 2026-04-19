@@ -473,12 +473,15 @@ fn get_connected_wifi() -> Option<String> {
 // ============= 检测互联网连接 =============
 
 async fn check_internet() -> bool {
-    match check_url("https://example.com/").await {
+    // 使用 Cloudflare 的 generate_204 端点
+    // 返回 204 表示已连接互联网，返回 200/重定向表示需要登录
+    match check_url("http://cp.cloudflare.com/generate_204").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
     }
-    match check_url("http://connect.rom.miui.com/generate_204").await {
+    // 备用检测
+    match check_url("https://www.baidu.com/").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
