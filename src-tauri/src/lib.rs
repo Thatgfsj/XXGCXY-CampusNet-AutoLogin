@@ -484,12 +484,15 @@ fn get_connected_wifi() -> Option<String> {
 // ============= 检测互联网连接 =============
 
 async fn check_internet() -> bool {
-    match check_url("https://example.com/").await {
+    // 使用 Cloudflare 的 generate_204 端点
+    // 返回 204 表示已连接互联网，返回 200/重定向表示需要登录
+    match check_url("http://cp.cloudflare.com/generate_204").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
     }
-    match check_url("http://connect.rom.miui.com/generate_204").await {
+    // 备用检测
+    match check_url("https://www.baidu.com/").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
@@ -604,14 +607,16 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
         .map(|p| p.parent().unwrap_or(std::path::Path::new(".")).to_path_buf())
         .unwrap_or_else(|_| PathBuf::from("."));
 
+    // 获取资源目录
+    let resource_dir = app.path()
+        .resource_dir()
+        .unwrap_or_default();
+
     #[cfg(windows)]
     let possible_bat_paths: Vec<PathBuf> = vec![
         exe_dir.join("xywdl.bat"),
+        resource_dir.join("xywdl.bat"),
         exe_dir.join("_up_").join("xywdl.bat"),
-        app.path()
-            .resource_dir()
-            .map(|p| p.join("xywdl.bat"))
-            .unwrap_or_default(),
         std::env::current_dir()
             .map(|p| p.join("xywdl.bat"))
             .unwrap_or_default(),
@@ -620,11 +625,8 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     #[cfg(not(windows))]
     let possible_sh_paths: Vec<PathBuf> = vec![
         exe_dir.join("xywdl.sh"),
+        resource_dir.join("xywdl.sh"),
         exe_dir.join("_up_").join("xywdl.sh"),
-        app.path()
-            .resource_dir()
-            .map(|p| p.join("xywdl.sh"))
-            .unwrap_or_default(),
         std::env::current_dir()
             .map(|p| p.join("xywdl.sh"))
             .unwrap_or_default(),
@@ -634,20 +636,21 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     let script_path = possible_bat_paths
         .into_iter()
         .find(|p| p.exists())
-        .ok_or_else(|| format!("登录脚本不存在 (exe目录: {})", exe_dir.display()))?;
+        .ok_or_else(|| format!("登录脚本不存在 (exe目录: {}, 资源目录: {})", exe_dir.display(), resource_dir.display()))?;
 
     #[cfg(not(windows))]
     let script_path = possible_sh_paths
         .into_iter()
         .find(|p| p.exists())
-        .ok_or_else(|| format!("登录脚本不存在 (exe目录: {})", exe_dir.display()))?;
+        .ok_or_else(|| format!("登录脚本不存在 (exe目录: {}, 资源目录: {})", exe_dir.display(), resource_dir.display()))?;
 
     #[cfg(windows)]
     {
         let shell = app.shell();
+        // 直接执行bat脚本，不使用start
         let output = shell
             .command("cmd")
-            .args(["/c", "start", "/wait", &script_path.to_string_lossy()])
+            .args(["/c", &script_path.to_string_lossy()])
             .output()
             .await
             .map_err(|e| format!("执行登录脚本失败: {}", e))?;
@@ -655,7 +658,8 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             Ok("登录脚本执行成功".to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Err(format!("登录脚本执行失败: {}", stderr))
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            Err(format!("登录脚本执行失败: {} {}", stderr, stdout))
         }
     }
 
