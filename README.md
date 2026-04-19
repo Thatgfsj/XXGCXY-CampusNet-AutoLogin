@@ -1,6 +1,6 @@
-# XXGCXY-CampusNet-AutoLogin
+# XXGCXY-CampusNet-AutoLogin (Windows 系统PS7版)
 
-校园网自动登录助手 - 一个基于 Tauri 2.x 开发的 Windows 桌面应用，用于自动检测和重连校园网 WiFi，并执行自动登录脚本。
+校园网自动登录助手 - 基于 Tauri 2.x 的 Windows 桌面应用，需要系统已安装 PowerShell 7。
 
 ## 功能特性
 
@@ -10,7 +10,31 @@
 - **系统托盘运行** - 关闭窗口后最小化到托盘，后台运行
 - **开机自启动** - 可选的开机自动启动功能
 - **中文安装界面** - 安装包支持简体中文界面
-- **内置 PowerShell 7** - 安装包已内置 PS7，无需手动安装
+
+## 安装前提
+
+### 必须安装 PowerShell 7
+
+本版本**不包含** PowerShell 7 便携版，需要您系统已安装 PowerShell 7。
+
+**安装方式（任选一种）：**
+
+1. **Microsoft Store**（推荐，简单快速）
+   - 打开 Microsoft Store
+   - 搜索 "PowerShell"
+   - 安装 "PowerShell (Preview)" 或稳定版
+
+2. **GitHub 下载**
+   - 访问 [PowerShell Releases](https://github.com/PowerShell/PowerShell/releases)
+   - 下载 `PowerShell-7.x.x-win-x64.msi`
+   - 双击安装
+
+3. **-winget 命令行**
+   ```powershell
+   winget install Microsoft.PowerShell
+   ```
+
+安装完成后，按 `Win+R` 输入 `pwsh` 验证是否安装成功。
 
 ## 安装
 
@@ -20,39 +44,29 @@
 2. 双击运行安装程序，按照提示完成安装
 3. 安装完成后，桌面会生成快捷方式
 
-> **注意**：安装包已内置 PowerShell 7，无需额外安装或网络连接。
+> **前提**：请先安装 PowerShell 7（见上文）
 
 ### Windows 便携版
 
-下载 `xxgcxy-wifi.exe` 独立运行程序（不包含 PowerShell 7，需确保系统已安装 PowerShell 7）。
+下载 `xxgcxy-wifi.exe` 独立运行程序。
 
-### Linux
+> **前提**：确保系统已安装 PowerShell 7
 
-下载并运行 `xywdl.sh` 脚本（需要系统已安装 PowerShell 7 或 pwsh）。
+## 版本说明
 
-## 技术架构
+| 版本 | 内置PS7 | 需要系统PS7 | 说明 |
+|------|---------|-------------|------|
+| win-portable | ✅ 是 | ❌ 否 | 包含PS7便携版，开箱即用 |
+| **win-system-ps7** | ❌ 否 | ✅ 是 | 需要系统已安装 PowerShell 7 |
 
-### 组件说明
-
-| 组件 | 说明 |
-|------|------|
-| `xywdl.bat` | Windows 启动器，自动查找并调用内置或系统 PowerShell |
-| `xywdl.ps1` | 校园网登录 PowerShell 脚本 |
-| `src-tauri/bin/_pw7_/` | 内置的 PowerShell 7 便携版 |
-| `xxgcxy-wifi.exe` | Tauri 应用主程序 |
-
-### PowerShell 查找顺序
+## PowerShell 查找顺序
 
 `xywdl.bat` 按以下顺序查找 PowerShell：
 
-1. `安装目录\_pw7_\pwsh.exe` - 内置的 PS7（优先）
-2. `安装目录\..\bin\_pw7_\pwsh.exe`
-3. 系统 `pwsh.exe`（PowerShell 7）
-4. 系统 `powershell.exe`（Windows PowerShell 5.1，回退）
+1. 系统 `pwsh.exe`（PowerShell 7）- **必须安装**
+2. 系统 `powershell.exe`（Windows PowerShell 5.1，回退）
 
-### 内置 PowerShell 7 许可
-
-本项目内置的 PowerShell 7 便携版来自 [github.com/PowerShell/PowerShell](https://github.com/PowerShell/PowerShell)，遵循 [MIT 开源协议](https://github.com/PowerShell/PowerShell/blob/master/LICENSE.txt)。
+> **注意**：本版本不包含内置 PS7 目录，如果系统未安装 PS7，脚本将回退使用 Windows PowerShell 5.1（可能存在兼容性问题）。
 
 ## 项目结构
 
@@ -63,14 +77,12 @@ xxgcxy-wifi/
 ├── xywdl.ps1               # 校园网登录脚本
 ├── xywdl.bat               # Windows 启动器
 ├── xywdl.sh                # Linux 启动脚本
-├── src-tauri/              # Tauri 后端目录
-│   ├── Cargo.toml          # Rust 依赖配置
-│   ├── tauri.conf.json     # Tauri 配置
-│   ├── bin/_pw7_/          # 内置 PowerShell 7 便携版
-│   └── src/
-│       ├── lib.rs          # 主要业务逻辑
-│       └── main.rs         # 程序入口
-└── dist/                   # 前端构建输出
+└── src-tauri/              # Tauri 后端目录
+    ├── Cargo.toml          # Rust 依赖配置
+    ├── tauri.conf.json     # Tauri 配置
+    └── src/
+        ├── lib.rs          # 主要业务逻辑
+        └── main.rs         # 程序入口
 ```
 
 ## 开发
@@ -80,6 +92,7 @@ xxgcxy-wifi/
 - Rust 1.70+
 - Node.js 18+
 - Windows 10/11 或 Linux
+- PowerShell 7
 
 ### 构建步骤
 
@@ -93,8 +106,6 @@ npm run tauri dev
 # 构建生产版本
 npm run tauri build
 ```
-
-> **Windows 构建说明**：PowerShell 7 便携版已内置在 `src-tauri/bin/_pw7_/`，会自动打包进安装包。登录脚本会优先使用内置 PS7，如找不到则回退使用系统 `powershell`。
 
 ### 构建产物
 
@@ -124,15 +135,11 @@ npm run tauri build
 2. **网络检测间隔** - 建议设置 10-60 秒，过短可能影响性能
 3. **首次运行** - 需要先配置 WiFi 网络才能正常使用
 4. **管理员权限** - 连接某些 WiFi 可能需要管理员权限
+5. **PowerShell 7** - 本版本需要系统已安装 PowerShell 7
 
 ## 许可证
 
 MIT License
-
-## 开源许可
-
-- **本项目**：MIT License
-- **PowerShell 7**：MIT License（来源：github.com/PowerShell/PowerShell）
 
 ## 作者
 
@@ -141,5 +148,3 @@ MIT License
 ---
 
 如有问题或建议，欢迎提交 [Issue](https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin/issues)
-
-> **声明**：本脚本所有经验仅供自动化协议学习研究，请遵守各高校管理相关要求。
