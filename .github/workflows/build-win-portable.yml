@@ -1,0 +1,59 @@
+name: Build Win-Portable Release
+
+on:
+  push:
+    branches:
+      - win-portable
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build with Tauri CLI
+        run: npx @tauri-apps/cli build
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v1.4.${{ github.run_number }}-win-portable
+          name: v1.4.${{ github.run_number }} Win-Portable (内置PS7)
+          body: |
+            ## Windows 便携版 (内置 PowerShell 7)
+
+            **本版本内置 PowerShell 7.6.0 便携版，开箱即用，无需额外安装。**
+
+            ### 内置 PowerShell 7 许可声明
+
+            ⚠️ 本版本内置的 PowerShell 7 便携版遵循 MIT 开源协议
+
+            - 来源: https://github.com/PowerShell/PowerShell
+            - 许可证: MIT License
+            - 许可证文件: `src-tauri/bin/_pw7_/LICENSE.txt`
+
+            ---
+            MIT License | 作者: Thatgfsj
+          files: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
