@@ -1,162 +1,62 @@
-# XXGCXY-CampusNet-AutoLogin (Windows 便携版)
+# XXGCXY-CampusNet-AutoLogin - Windows 便携版
 
-校园网自动登录助手 - 基于 Tauri 2.x 的 Windows 桌面应用，**内置 PowerShell 7 便携版**，开箱即用。
+校园网自动登录助手 - Windows 便携版，内置 PowerShell 7，开箱即用。
+
+## 下载地址
+
+**GitHub Releases**: https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin/releases/tag/v1.4.0-all
+
+## 版本说明
+
+本版本已内置 PowerShell 7.6.0 便携版，无需额外安装，开箱即用。
+
+### 内置 PowerShell 7 许可声明
+
+本版本内置的 PowerShell 7 便携版遵循 MIT 开源协议。
+
+来源: https://github.com/PowerShell/PowerShell
+许可证: MIT License
 
 ## 功能特性
 
 - **自动检测网络状态** - 实时监测 WiFi 连接和互联网访问状态
 - **自动重连 WiFi** - 检测到断网时自动连接预设的 WiFi 网络
 - **自动登录校园网** - WiFi 连接后自动执行登录脚本
-- **系统托盘运行** - 关闭窗口后最小化到托盘，后台运行
 - **开机自启动** - 可选的开机自动启动功能
-- **中文安装界面** - 安装包支持简体中文界面
-- **内置 PowerShell 7** - 安装包已内置 PS7，无需手动安装
+- **内置 PowerShell 7** - 已内置 PS7，无需手动安装
 
-## 安装
+## 安装说明
 
-### Windows 安装包（推荐）
-
-1. 下载最新的 `xxgcxy-wifi_x.x.x_x64-setup.exe` 安装包
+1. 下载 `xxgcxy-wifi_1.4.0_x64-setup.exe`
 2. 双击运行安装程序，按照提示完成安装
 3. 安装完成后，桌面会生成快捷方式
 
-> **注意**：安装包已内置 PowerShell 7，无需额外安装或网络连接。
+## 技术架构
 
-### Windows 便携版
+| 组件 | 说明 |
+|------|------|
+| `xywdl.bat` | Windows 启动器，自动查找并调用内置 PowerShell |
+| `xywdl.ps1` | 校园网登录 PowerShell 脚本 |
+| `src-tauri/bin/_pw7_/` | 内置的 PowerShell 7.6.0 便携版 |
+| `xxgcxy-wifi.exe` | Tauri 应用主程序 |
 
-下载 `xxgcxy-wifi.exe` 独立运行程序（已内置 PowerShell 7 便携版）。
-
-## 版本说明
-
-| 版本 | 内置PS7 | 需要系统PS7 | 说明 |
-|------|---------|-------------|------|
-| **win-portable** | ✅ 是 | ❌ 否 | 包含PS7便携版，开箱即用 |
-| win-system-ps7 | ❌ 否 | ✅ 是 | 需要系统已安装 PowerShell 7 |
-
-## 内置 PowerShell 7 许可声明
-
-⚠️ **本项目内置的 PowerShell 7 便携版遵循 MIT 开源协议**
-
-本版本已内置 PowerShell 7 便携版，来源：[github.com/PowerShell/PowerShell](https://github.com/PowerShell/PowerShell)
-
-- **PowerShell 7 许可证**：MIT License
-- **许可证文件**：已包含在 `src-tauri/bin/_pw7_/LICENSE.txt`
-- **协议原文**：https://github.com/PowerShell/PowerShell/blob/master/LICENSE.txt
-
-```
-MIT License
-
-Copyright (c) Microsoft Corporation. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-## PowerShell 查找顺序
-
-`xywdl.bat` 按以下顺序查找 PowerShell：
+### PowerShell 查找顺序
 
 1. `安装目录\_pw7_\pwsh.exe` - 内置的 PS7（优先）
-2. `安装目录\..\bin\_pw7_\pwsh.exe`
-3. 系统 `pwsh.exe`（PowerShell 7）
-4. 系统 `powershell.exe`（Windows PowerShell 5.1，回退）
+2. 系统 `pwsh.exe`（PowerShell 7）
+3. 系统 `powershell.exe`（Windows PowerShell 5.1，回退）
 
-## 项目结构
+## WiFi扫描权限说明
 
-```
-xxgcxy-wifi/
-├── index.html              # 前端界面
-├── package.json            # Node.js 依赖配置
-├── xywdl.ps1               # 校园网登录脚本
-├── xywdl.bat               # Windows 启动器
-├── xywdl.sh                # Linux 启动脚本
-├── src-tauri/              # Tauri 后端目录
-│   ├── Cargo.toml          # Rust 依赖配置
-│   ├── tauri.conf.json     # Tauri 配置
-│   ├── bin/_pw7_/         # 内置 PowerShell 7 便携版
-│   │   ├── pwsh.exe       # PowerShell 7 主程序
-│   │   ├── *.dll          # 运行时库
-│   │   └── LICENSE.txt     # MIT 许可证
-│   └── src/
-│       ├── lib.rs          # 主要业务逻辑
-│       └── main.rs         # 程序入口
-└── dist/                   # 前端构建输出
-```
+WiFi扫描功能需要以下权限之一：
 
-## 开发
+1. **以管理员身份运行** - 右键程序选择"以管理员身份运行"
+2. **开启位置服务** - 前往 设置 > 隐私与安全 > 位置服务 开启
 
-### 环境要求
-
-- Rust 1.70+
-- Node.js 18+
-- Windows 10/11 或 Linux
-
-### 构建步骤
-
-```bash
-# 安装依赖
-npm install
-
-# 开发模式运行
-npm run tauri dev
-
-# 构建生产版本
-npm run tauri build
-```
-
-### 构建产物
-
-- **Windows 安装包**: `src-tauri/target/release/bundle/nsis/xxgcxy-wifi_x.x.x_x64-setup.exe`
-- **Windows MSI**: `src-tauri/target/release/bundle/msi/xxgcxy-wifi_x.x.x_x64.msi`
-- **Windows 独立程序**: `src-tauri/target/release/xxgcxy-wifi.exe`
-- **Linux DEB**: `src-tauri/target/release/bundle/deb/xxgcxy-wifi_x.x.x_amd64.deb`
-
-## 首次配置
-
-1. 启动程序
-2. 点击 **"网络配置"** 按钮
-3. 程序会自动扫描附近的 WiFi 网络
-4. 选择您的 **主网络**（优先连接）和 **备用网络**
-5. 设置检测间隔（默认 15 秒，建议 10-60 秒）
-6. 点击 **"保存配置"**
-
-### 登录脚本配置
-
-1. 退出校园网（浏览器输入 2.2.2.2，点击退出）
-2. 等待弹出校园网登录页面时，复制地址栏中的 URL
-3. 程序会弹出脚本配置窗口，粘贴 URL 并填写个人信息
-
-## 注意事项
-
-1. **配置文件安全** - `xywdl.ps1` 包含您的账号密码，请妥善保管
-2. **网络检测间隔** - 建议设置 10-60 秒，过短可能影响性能
-3. **首次运行** - 需要先配置 WiFi 网络才能正常使用
-4. **管理员权限** - 连接某些 WiFi 可能需要管理员权限
+如果遇到WiFi扫描失败，请尝试上述方法。
 
 ## 许可证
 
-- **本项目**：MIT License
-- **PowerShell 7**：MIT License（来源：github.com/PowerShell/PowerShell）
+MIT License
 
-## 作者
-
-[Thatgfsj](https://github.com/Thatgfsj)
-
----
-
-如有问题或建议，欢迎提交 [Issue](https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin/issues)
+作者: Thatgfsj
