@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi", "deb"],
+    "targets": ["nsis", "msi"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -42,30 +42,14 @@
       "../xywdl.sh",
       "../src-tauri/bin/_pw7_/*"
     ],
-    "linux": {
-      "appimage": {
-        "bundleMediaFramework": false
-      },
-      "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "network-manager"],
-        "desktop": {
-          "categories": ["Network"],
-          "icon": ["icons/128x128.png"]
-        }
-      }
-    },
     "windows": {
       "webviewInstallMode": {
         "type": "embedBootstrapper"
       },
-      "wix": {
-        "language": "zh-CN"
-      },
       "nsis": {
         "languages": ["SimpChinese"],
         "displayLanguageSelector": false,
-        "installMode": "currentUser",
-        "installerHooks": "./nsis/installer.nsi"
+        "installMode": "currentUser"
       }
     }
   },
