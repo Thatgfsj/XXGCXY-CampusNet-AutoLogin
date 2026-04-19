@@ -39,7 +39,8 @@
     "resources": [
       "../xywdl.ps1",
       "../xywdl.bat",
-      "../xywdl.sh"
+      "../xywdl.sh",
+      "../src-tauri/bin/_pw7_/*"
     ],
     "linux": {
       "appimage": {
