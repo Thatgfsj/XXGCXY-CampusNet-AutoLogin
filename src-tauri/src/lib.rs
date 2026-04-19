@@ -256,15 +256,26 @@ fn save_config(config: Config, state: tauri::State<'_, AppState>) -> Result<(), 
 async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
     #[cfg(windows)]
     {
+        // 先尝试触发扫描
         let _ = hidden_command("netsh")
             .args(["wlan", "scan"])
             .output();
         std::thread::sleep(std::time::Duration::from_secs(2));
+
         let output = hidden_command("netsh")
             .args(["wlan", "show", "networks", "mode=bssid"])
             .output()
             .map_err(|e| format!("执行扫描命令失败: {}", e))?;
+
         let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // 检查是否是权限/位置服务问题
+        if stdout.contains("位置权限") || stdout.contains("位置服务")
+            || stdout.contains("需要提升") || stdout.contains("管理员")
+            || stdout.contains("需要以管理员身份运行") {
+            return Err("WIFI_PERMISSION_DENIED".to_string());
+        }
+
         let mut networks = Vec::new();
         let mut current_ssid = String::new();
         let mut current_signal: u8 = 0;

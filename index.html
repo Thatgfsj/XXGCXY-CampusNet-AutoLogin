@@ -701,9 +701,23 @@
                 wifiNetworks = networks;
                 renderWifiList();
             } catch (e) {
-                addLog('扫描WiFi失败: ' + e);
-                document.getElementById('wifiList').innerHTML = 
-                    '<div style="padding: 20px; text-align: center; color: #666;">扫描失败，请重试</div>';
+                if (e === 'WIFI_PERMISSION_DENIED') {
+                    addLog('扫描WiFi失败: 需要管理员权限或开启位置服务');
+                    document.getElementById('wifiList').innerHTML =
+                        '<div style="padding: 20px; text-align: center; color: #f59e0b;">' +
+                        '<div style="font-size: 32px; margin-bottom: 10px;">⚠️</div>' +
+                        '<div style="font-weight: bold; margin-bottom: 10px;">需要权限</div>' +
+                        '<div style="font-size: 13px; color: #666; line-height: 1.5;">' +
+                        'WiFi扫描需要管理员权限或开启位置服务<br>' +
+                        '请右键选择"以管理员身份运行"<br>' +
+                        '或前往"设置 > 隐私与安全 > 位置"开启位置服务' +
+                        '</div>' +
+                        '</div>';
+                } else {
+                    addLog('扫描WiFi失败: ' + e);
+                    document.getElementById('wifiList').innerHTML =
+                        '<div style="padding: 20px; text-align: center; color: #666;">扫描失败，请重试</div>';
+                }
             }
         }
         
