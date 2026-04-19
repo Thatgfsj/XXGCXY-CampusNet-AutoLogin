@@ -1,0 +1,192 @@
+name: Build All Platforms Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ============================================
+  # Windows + 内置 PS7 (win-portable 分支)
+  # ============================================
+  build-win-portable:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout win-portable
+        uses: actions/checkout@v4
+        with:
+          ref: win-portable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Tauri
+        run: npx @tauri-apps/cli build
+
+      - name: Upload NSIS
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-portable-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+
+      - name: Upload MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-portable-msi
+          path: src-tauri/target/release/bundle/msi/*.msi
+
+  # ============================================
+  # Windows + 系统 PS7 (win-system-ps7 分支)
+  # ============================================
+  build-win-system:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout win-system-ps7
+        uses: actions/checkout@v4
+        with:
+          ref: win-system-ps7
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Tauri
+        run: npx @tauri-apps/cli build
+
+      - name: Upload NSIS
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-system-nsis
+          path: src-tauri/target/release/bundle/nsis/*.exe
+
+      - name: Upload MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-system-msi
+          path: src-tauri/target/release/bundle/msi/*.msi
+
+  # ============================================
+  # Linux + sh 脚本 (linux-sh 分支)
+  # ============================================
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout linux-sh
+        uses: actions/checkout@v4
+        with:
+          ref: linux-sh
+
+      - name: Package Linux script
+        run: |
+          mkdir -p release/linux
+          cp xywdl.sh release/linux/
+          chmod +x release/linux/xywdl.sh
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: release/linux/xywdl.sh
+
+  # ============================================
+  # 创建统一 Release
+  # ============================================
+  release:
+    needs: [build-win-portable, build-win-system, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download win-portable NSIS
+        uses: actions/download-artifact@v4
+        with:
+          name: win-portable-nsis
+          path: artifacts/win-portable
+
+      - name: Download win-portable MSI
+        uses: actions/download-artifact@v4
+        with:
+          name: win-portable-msi
+          path: artifacts/win-portable
+
+      - name: Download win-system NSIS
+        uses: actions/download-artifact@v4
+        with:
+          name: win-system-nsis
+          path: artifacts/win-system
+
+      - name: Download win-system MSI
+        uses: actions/download-artifact@v4
+        with:
+          name: win-system-msi
+          path: artifacts/win-system
+
+      - name: Download Linux
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-deb
+          path: artifacts/linux
+
+      - name: List artifacts
+        run: |
+          echo "=== Artifacts ==="
+          find artifacts -type f
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.4.0-all
+          name: v1.4.0 正式版 (含5个安装包)
+          body: |
+            ## 下载说明
+
+            ### Windows 版本 (内置 PS7 便携版)
+            - `xxgcxy-wifi_1.4.0_x64-setup.exe` - NSIS 安装包
+            - `xxgcxy-wifi_1.4.0_x64.msi` - MSI 安装包
+
+            ### Windows 版本 (需系统安装 PS7)
+            - `xxgcxy-wifi_1.4.0_no-ps7-setup.exe` - NSIS 安装包
+            - `xxgcxy-wifi_1.4.0_no-ps7.msi` - MSI 安装包
+
+            ### Linux 版本
+            - `xywdl.sh` - Shell 脚本 (需安装 pwsh)
+
+            ## 版本说明
+
+            | 版本 | 内置PS7 | 需要系统PS7 |
+            |------|---------|-------------|
+            | 内置PS7版 | ✅ | ❌ |
+            | 系统PS7版 | ❌ | ✅ |
+            | Linux版 | N/A | ✅ (pwsh) |
+
+            ## Linux 安装 pwsh
+
+            ```bash
+            # Ubuntu/Debian
+            wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+            sudo dpkg -i packages-microsoft-prod.deb
+            sudo apt update && sudo apt install powershell
+            ```
+
+            ---
+            MIT License | 作者: Thatgfsj
+          files: |
+            artifacts/win-portable/*.exe
+            artifacts/win-portable/*.msi
+            artifacts/win-system/*.exe
+            artifacts/win-system/*.msi
+            artifacts/linux/*.sh
