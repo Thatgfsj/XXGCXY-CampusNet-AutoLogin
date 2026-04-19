@@ -17,6 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: win-portable
+          lfs: true
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -161,15 +162,15 @@ jobs:
             ## 下载说明
 
             ### Windows 版本 (内置 PS7 便携版)
-            - `xxgcxy-wifi_1.4.0_x64-setup.exe` - NSIS 安装包
-            - `xxgcxy-wifi_1.4.0_x64_en-US.msi` - MSI 安装包
+            - xxgcxy-wifi_1.4.0_x64-setup.exe - NSIS 安装包
+            - xxgcxy-wifi_1.4.0_x64_en-US.msi - MSI 安装包
 
             ### Windows 版本 (需系统安装 PS7)
-            - `xxgcxy-wifi_1.4.0_x64-setup_no-ps7.exe` - NSIS 安装包
-            - `xxgcxy-wifi_1.4.0_x64_en-US_no-ps7.msi` - MSI 安装包
+            - xxgcxy-wifi_1.4.0_x64-setup_no-ps7.exe - NSIS 安装包
+            - xxgcxy-wifi_1.4.0_x64_en-US_no-ps7.msi - MSI 安装包
 
             ### Linux 版本
-            - `xywdl.sh` - Shell 脚本 (需安装 pwsh)
+            - xywdl.sh - Shell 脚本 (需安装 pwsh)
 
             ## 版本说明
 
