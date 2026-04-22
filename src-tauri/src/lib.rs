@@ -383,6 +383,12 @@ async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
 async fn connect_wifi(ssid: String) -> Result<(), String> {
     #[cfg(windows)]
     {
+        // 先断开当前连接（如果有）
+        let _ = hidden_command("netsh")
+            .args(["wlan", "disconnect"])
+            .output();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
         let name_arg = format!("name={}", ssid);
         let output = hidden_command("netsh")
             .args(["wlan", "connect", &name_arg])
@@ -570,11 +576,15 @@ async fn check_network(state: tauri::State<'_, AppState>) -> Result<NetworkStatu
     let config = state.config.lock().unwrap().clone();
     let wifi_connected = get_connected_wifi();
     let internet_ok = check_internet().await;
-    let needs_reconnect =
-        wifi_connected.is_none()
+    let needs_reconnect = wifi_connected.is_none()
         || (!config.primary_ssid.is_empty()
-            && wifi_connected.as_ref() != Some(&config.primary_ssid));
-    let needs_login = wifi_connected.is_some() && !internet_ok;
+            && wifi_connected.as_ref() != Some(&config.primary_ssid)
+            && wifi_connected.as_ref() != Some(&config.backup_ssid));
+    let needs_login = wifi_connected.is_some()
+        && !internet_ok
+        && (config.primary_ssid.is_empty()
+            || wifi_connected.as_ref() == Some(&config.primary_ssid)
+            || wifi_connected.as_ref() == Some(&config.backup_ssid));
     Ok(NetworkStatus {
         wifi_connected,
         internet_ok,
