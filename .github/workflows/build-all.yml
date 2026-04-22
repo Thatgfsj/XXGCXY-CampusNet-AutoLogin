@@ -156,18 +156,18 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.0-all
-          name: v1.5.0 正式版 (含5个安装包)
+          tag_name: v1.5.5-all
+          name: v1.5.5 正式版 (含5个安装包)
           body: |
             ## 下载说明
 
             ### Windows 版本 (内置 PS7 便携版)
-            - xxgcxy-wifi_1.4.0_x64-setup.exe - NSIS 安装包
-            - xxgcxy-wifi_1.4.0_x64_en-US.msi - MSI 安装包
+            - xxgcxy-wifi_1.5.5_x64-setup.exe - NSIS 安装包
+            - xxgcxy-wifi_1.5.5_x64_en-US.msi - MSI 安装包
 
             ### Windows 版本 (需系统安装 PS7)
-            - xxgcxy-wifi_1.4.0_x64-setup_no-ps7.exe - NSIS 安装包
-            - xxgcxy-wifi_1.4.0_x64_en-US_no-ps7.msi - MSI 安装包
+            - xxgcxy-wifi_1.5.5_x64-setup_no-ps7.exe - NSIS 安装包
+            - xxgcxy-wifi_1.5.5_x64_en-US_no-ps7.msi - MSI 安装包
 
             ### Linux 版本
             - xywdl.sh - Shell 脚本 (需安装 pwsh)
