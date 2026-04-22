@@ -181,6 +181,57 @@ class NetworkInterfaceHelper {
         } catch {}
         return $null
     }
+
+    [string] GetCurrentSsid() {
+        try {
+            $wifi = netsh wlan show interfaces | Out-String
+            if ($wifi -match 'SSID\s*:\s*(.+)') {
+                return $matches[1].Trim()
+            }
+        } catch {}
+        return $null
+    }
+
+    [bool] IsConfiguredSsidConnected([string]$targetSsid) {
+        if ([string]::IsNullOrEmpty($targetSsid)) { return $true }
+        $currentSsid = $this.GetCurrentSsid()
+        if ($currentSsid -eq $targetSsid) {
+            $adapter = Get-NetAdapter | Where-Object {
+                ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
+                $_.Status -eq 'Up' -and
+                $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
+            } | Select-Object -First 1
+            return ($null -ne $adapter)
+        }
+        return $false
+    }
+
+    [void] ReconnectToSsid([string]$targetSsid) {
+        if ([string]::IsNullOrEmpty($targetSsid)) { return }
+        Write-Host "当前已断开配置WiFi ($targetSsid)，正在尝试重连..." -ForegroundColor Yellow
+        try {
+            $profiles = netsh wlan show profiles | Out-String
+            if ($profiles -notmatch $targetSsid) {
+                Write-Host "未找到已保存的WiFi配置: $targetSsid" -ForegroundColor Red
+                return
+            }
+            netsh wlan disconnect | Out-Null
+            Start-Sleep -Milliseconds 500
+            netsh wlan connect name="$targetSsid" | Out-Null
+            Write-Host "正在连接 $targetSsid ..." -ForegroundColor Cyan
+            $maxWait = 15
+            for ($i = 0; $i -lt $maxWait; $i++) {
+                Start-Sleep -Seconds 1
+                if ($this.IsConfiguredSsidConnected($targetSsid)) {
+                    Write-Host "WiFi 重连成功！" -ForegroundColor Green
+                    return
+                }
+            }
+            Write-Host "WiFi 重连超时" -ForegroundColor Red
+        } catch {
+            Write-Host "WiFi 重连失败: $($_.Exception.Message)" -ForegroundColor Red
+        }
+    }
 }
 
 class RedirectUrlParser {
@@ -248,6 +299,9 @@ class AuthenticationClient {
             $this.ApplyConfig($savedConfig)
             if (-not [string]::IsNullOrEmpty($savedConfig['Password'])) {
                 $this.Config.Passwd = ConvertTo-SecureString $savedConfig['Password'] -AsPlainText -Force
+            }
+            if (-not $this.NetworkHelper.IsConfiguredSsidConnected($this.Config.Ssid)) {
+                $this.NetworkHelper.ReconnectToSsid($this.Config.Ssid)
             }
             $this.PerformAuthentication()
             return
@@ -449,6 +503,9 @@ class AuthenticationClient {
 
     [void] PerformAuthentication() {
         Write-Host "`n=== 步骤3：开始认证 ===" -ForegroundColor Yellow
+        if (-not $this.NetworkHelper.IsConfiguredSsidConnected($this.Config.Ssid)) {
+            $this.NetworkHelper.ReconnectToSsid($this.Config.Ssid)
+        }
         Write-Host "MAC地址: $($this.Config.MacAddress)" -ForegroundColor Gray
 
         $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($this.Config.Passwd)
