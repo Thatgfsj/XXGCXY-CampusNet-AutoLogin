@@ -1,6 +1,6 @@
 # XXGCXY-CampusNet-AutoLogin
 
-校园网自动登录助手 - 基于 Tauri 2.x 的 Windows 桌面应用，用于自动检测和重连校园网 WiFi，并执行自动登录脚本。
+新乡工程校园网自动登录助手 - 基于 Tauri 2.x 的 Windows 桌面应用，用于自动检测和重连校园网 WiFi，并执行自动登录脚本。
 
 ## 下载地址
 
