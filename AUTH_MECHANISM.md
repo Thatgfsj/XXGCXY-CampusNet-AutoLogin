@@ -1,6 +1,6 @@
 # 校园网 Web 认证（Portal Authentication）机制详解
 
-> 本文档详细解析新乡工程学院校园网的认证协议、请求结构，以及本项目中 PowerShell 脚本的自动化实现原理。
+> 本文档详细解析xxgcxy校园网的认证协议、请求结构，以及本项目中 PowerShell 脚本的自动化实现原理。
 
 ---
 
