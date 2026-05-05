@@ -1,261 +1,429 @@
 # 校园网 Web 认证（Portal Authentication）机制详解
 
-> 本文档解析xxgcxy校园网的 Portal 认证协议、客户端自动化实现原理及关键设计决策。
+> 本文档讲解xxgcxy校园网的 Portal 认证协议，以及本项目中 PowerShell 脚本的自动化实现原理。
+
+---
+
+## 目录
+
+1. [什么是 Portal 认证](#1-什么是-portal-认证)
+2. [认证流程全景](#2-认证流程全景)
+3. [协议分析：请求参数详解](#3-协议分析请求参数详解)
+4. [动态参数获取策略](#4-动态参数获取策略)
+5. [脚本核心实现](#5-脚本核心实现)
+6. [安全设计：凭证管理](#6-安全设计凭证管理)
+7. [认证响应码](#7-认证响应码)
+8. [连通性验证：为什么用 204？](#8-连通性验证为什么用-204)
+9. [附录：关键代码位置](#9-附录关键代码位置)
 
 ---
 
 ## 1. 什么是 Portal 认证
 
-**Portal Authentication（Web 认证）** 是高校通用的网络准入方案：
+**Portal Authentication（Web 认证）** 是目前国内高校普遍采用的网络准入控制方案。它的工作方式如下：
 
-1. 设备连接 WiFi → DHCP 分配 IP → **默认无法访问外网**
-2. 浏览器访问任意 HTTP 网站 → **AC 劫持请求并 302 重定向**到认证服务器 Portal 页面
-3. 用户提交凭证 → 服务器验证 → 将该设备 MAC/IP 加入放行列表 → 可以上网
+用户连接校园网 WiFi 后，设备虽然拿到了 IP 地址，但**默认情况下无法访问外网**。此时如果用户打开浏览器访问任意一个 HTTP 网站，**AC（无线接入控制器）会拦截这个请求，并以 302 重定向的方式将浏览器引导到认证服务器的 Portal 登录页面**。用户在页面中输入账号密码提交，认证服务器验证通过后，将该设备的 MAC 地址和 IP 加入放行列表，设备随即获得外网访问权限。
 
-底层依赖 **AC + RADIUS** 协同，但客户端只需关注一件事：**向认证服务器发一个携带正确参数的 HTTP GET 请求**。
+这一整套流程的底层由 **AC + RADIUS 服务器** 协同完成，但对客户端来说，核心任务只有一件：**向认证服务器发送一个携带正确参数的 HTTP GET 请求**。浏览器渲染的登录页面本质上只是一层皮——表单提交的最终结果就是一次 GET 请求。抓住了这一点，就有条件用纯脚本替代浏览器来完成自动登录。
 
 ---
 
-## 2. 认证流程
+## 2. 认证流程全景
+
+下面这张时序图展示了从设备连接 WiFi 到最终上网的完整交互过程：
 
 ```
-客户端                    AC                    Portal Server           RADIUS
-  │                        │                         │                    │
-  │──关联WiFi──────────────>│                         │                    │
-  │<─DHCP分配IP────────────│                         │                    │
-  │──访问任意HTTP──────────>│                         │                    │
-  │                        │──劫持302重定向──────────>│                    │
-  │<─Portal页面(URL含IP/MAC/VLAN等参数)───────────────│                    │
-  │──GET认证请求(凭证+设备参数)───────────────────────>│                    │
-  │                        │                         │──RADIUS验证──────>│
-  │                        │                         │<─验证结果─────────│
-  │<─认证结果────────────────────────────────────────│                    │
+客户端                    AC                       Portal Server           RADIUS
+  │                        │                         │                      │
+  │  ① 关联 WiFi           │                         │                      │
+  │───────────────────────>│                         │                      │
+  │                        │                         │                      │
+  │  ② DHCP 分配 IP        │                         │                      │
+  │<───────────────────────│                         │                      │
+  │                        │                         │                      │
+  │  ③ 访问任意 HTTP 网站   │                         │                      │
+  │───────────────────────>│                         │                      │
+  │                        │  ④ AC 劫持 + 302 重定向  │                      │
+  │                        │────────────────────────>│                      │
+  │                        │                         │                      │
+  │  ⑤ 返回 Portal 页面（URL 中携带 wlanuserip/mac/vlan 等参数）             │
+  │<─────────────────────────────────────────────────│                      │
+  │                        │                         │                      │
+  │  ⑥ 提交认证 GET 请求（携带用户凭证 + 设备信息）                           │
+  │─────────────────────────────────────────────────>│                      │
+  │                        │                         │  ⑦ RADIUS 验证       │
+  │                        │                         │─────────────────────>│
+  │                        │                         │  ⑧ 返回验证结果       │
+  │                        │                         │<─────────────────────│
+  │                        │                         │                      │
+  │  ⑨ 返回认证结果         │                         │                      │
+  │<─────────────────────────────────────────────────│                      │
+  │                        │                         │                      │
+  │  ⑩ 可以上网了          │                         │                      │
 ```
 
-**本项目做的事**：跳过浏览器交互环节，直接构造 GET 请求发往认证服务器。
+本项目做的事情很直接：**跳过步骤 ③~⑤ 的浏览器交互环节**，直接从步骤 ⑥ 开始——构造 HTTP GET 请求发送到认证服务器。
 
 ---
 
-## 3. 协议分析
+## 3. 协议分析：请求参数详解
 
-### 3.1 请求基本信息
+### 3.1 请求概要
 
 | 属性 | 值 |
 |------|-----|
-| **端点** | `http://<认证服务器>:6060/quickauth.do` |
-| **方法** | `GET`，参数通过 Query String 传递 |
+| 目标端点 | `http://<认证服务器>:6060/quickauth.do` |
+| 请求方法 | `GET` |
+| 参数传递 | Query String（查询字符串） |
 
-### 3.2 参数分类
+不需要 POST body，不需要 Cookie，不需要 Session。所有认证信息全部编码在 URL 的查询字符串中。
 
-#### 用户凭证
+### 3.2 参数分类说明
 
-| 参数 | 格式 | 示例 |
+认证请求的 Query String 包含十余个参数，按性质可以分成四类。
+
+#### 第一类：用户凭证
+
+这两个参数直接决定认证是否通过：
+
+| 参数 | 格式 | 说明 |
 |------|------|------|
-| `userid` | `[学号]@[运营商后缀]` | `20210101001@xxgcyd` |
-| `passwd` | 明文（需 URL 编码） | `mypassword123` |
+| `userid` | `[学号]@[运营商后缀]` | 用户身份标识。后缀决定了认证请求被路由到哪个运营商的 RADIUS 服务器 |
+| `passwd` | 明文，需 URL 编码 | 校园网密码 |
 
-运营商后缀：移动 `@xxgcyd` / 联通 `@xxgclt` / 电信 `@xxgcdx`
+**运营商后缀对照：**
 
-#### 设备参数（动态获取）
+| 编号 | 运营商 | 后缀 |
+|:----:|--------|------|
+| 1 | 移动 | `@xxgcyd` |
+| 2 | 联通 | `@xxgclt` |
+| 3 | 电信 | `@xxgcdx` |
 
-| 参数 | 说明 | 来源 |
-|------|------|------|
-| `wlanuserip` | 客户端 IPv4 | 网卡查询 / URL 提取 |
-| `mac` | 无线网卡 MAC | 网卡查询 / URL 提取 |
-| `vlan` | 虚拟局域网 ID | **只能从重定向 URL 提取** |
-| `hostname` | 主机名 | `$env:COMPUTERNAME` |
+> 选择不同的运营商意味着认证请求会被转发到不同的 RADIUS 服务器进行身份校验，因此后缀必须和设备办理宽带时选择的运营商一致。
 
-#### 接入点固定参数
+#### 第二类：设备与网络环境参数
+
+这些参数随设备、位置和网络环境变化，每次登录都可能不同：
+
+| 参数 | 说明 | 获取方式 |
+|------|------|----------|
+| `wlanuserip` | 客户端当前分配的 IPv4 地址 | 查询无线网卡配置 / 从重定向 URL 提取 |
+| `mac` | 无线网卡物理地址 | 查询网卡属性 / 从重定向 URL 提取 |
+| `vlan` | 客户端所属虚拟局域网 ID | **只能从重定向 URL 提取**（系统无法直接查询） |
+| `hostname` | 计算机名 | `$env:COMPUTERNAME` |
+
+#### 第三类：接入点固定参数
+
+这些参数在同一校区内是固定不变的，由 AC 设备决定：
 
 | 参数 | 典型值 | 说明 |
 |------|--------|------|
-| `wlanacname` | `XXGC-AC-01` | AC 名称 |
-| `wlanacIp` | `172.18.252.1` | AC IP |
-| `portalpageid` | `3` | 门户页面 ID |
-| `portaltype` | `0` | 门户类型 |
-| `version` | `0` | 协议版本 |
-| `bindCtrlId` | (空) | 绑定控制 ID |
+| `wlanacname` | `XXGC-AC-01` | 无线接入控制器名称 |
+| `wlanacIp` | `172.18.252.1` | 无线接入控制器 IP 地址 |
+| `portalpageid` | `"3"` | Portal 页面模板 ID |
+| `portaltype` | `"0"` | Portal 认证类型 |
+| `version` | `"0"` | 协议接口版本号 |
+| `bindCtrlId` | 空字符串 | 绑定控制 ID |
 
-#### 唯一性参数（每次请求生成）
+#### 第四类：请求唯一性参数
+
+这两个参数由客户端在每次请求时动态生成，用于标识请求的唯一性，防止重放：
 
 | 参数 | 生成方式 |
 |------|----------|
-| `uuid` | `[guid]::NewGuid()` |
-| `timestamp` | 毫秒级 Unix 时间戳 |
+| `uuid` | `[guid]::NewGuid()` —— 标准 UUID v4 |
+| `timestamp` | Unix 时间戳 × 1000（毫秒级） |
 
 ### 3.3 完整请求示例
 
+将所有参数拼接到一起，最终发出的 GET 请求长这样（为便于阅读做了换行）：
+
 ```
-GET http://172.18.252.12:6060/quickauth.do?userid=20210101001%40xxgcyd&passwd=xxx
-  &wlanuserip=10.10.50.100&wlanacname=XXGC-AC-01&wlanacIp=172.18.252.1
-  &vlan=1050&mac=aa:bb:cc:dd:ee:ff&version=0&portalpageid=3&timestamp=1680000000000
-  &uuid=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&portaltype=0&hostname=MYPC&bindCtrlId=
+GET http://172.18.252.12:6060/quickauth.do
+  ?userid=20210101001%40xxgcyd
+  &passwd=mypassword123
+  &wlanuserip=10.10.50.100
+  &wlanacname=XXGC-AC-01
+  &wlanacIp=172.18.252.1
+  &vlan=1050
+  &mac=aa%3Abb%3Acc%3Add%3Aee%3Aff
+  &version=0
+  &portalpageid=3
+  &timestamp=1680000000000
+  &uuid=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+  &portaltype=0
+  &hostname=MYPC
+  &bindCtrlId=
 ```
 
 ---
 
-## 4. 动态参数获取
+## 4. 动态参数获取策略
 
-### 4.1 URL 解析 vs 系统查询
+### 4.1 两条路线的取舍
 
-| 方案 | 做法 | 致命问题 |
-|------|------|----------|
-| 系统查询 | `Get-NetAdapter` / `Get-NetIPAddress` | **VLAN 无法通过本地查询获取**；虚拟机网卡产生虚假结果 |
-| **URL 解析** ✓ | 解析 AC 重定向 URL 中的 Query String | 需成功捕获重定向 |
+要实现自动登录，必须解决一个问题：如何获取那些随设备和网络环境变化的参数（IP、MAC、VLAN）？我们探索了两条路线：
 
-**结论**：URL 解析为主（提取 BaseURL/VLAN/MAC），系统查询兜底（IP 地址补全）。
+**路线 A：系统查询。** 使用 `Get-NetAdapter`、`Get-NetIPAddress` 等 PowerShell cmdlet 直接从系统读取网络配置。
 
-### 4.2 重定向 URL 结构
+**路线 B：URL 解析。** 利用 AC 重定向到 Portal 页面时在 URL 中附带全部参数的这一行为，解析 URL 的 Query String 来提取参数。
 
-```
-http://172.18.252.12:6060/portal.do?wlanuserip=10.10.50.100&wlanacname=XXGC-AC-01
-  &wlanacIp=172.18.252.1&mac=AA:BB:CC:DD:EE:FF&vlan=1050&hostname=MYPC&rand=123456
-```
+路线 A 有两个致命缺陷：
 
-解析逻辑：
-1. 正则提取 `http://<host>/xxx.do` → 替换 `xxx.do` 为 `quickauth.do`
-2. 按 `&` 拆 Query String → 按 `=` 拆键值对 → 映射到内部字段
-3. MAC 标准化为小写冒号格式
+1. **VLAN ID 无法通过任何系统命令获取。** VLAN 是网络设备层面的概念，客户端操作系统不掌握这个信息。
+2. **虚拟机网卡干扰。** 如果电脑安装了 VirtualBox、VMware 或 Hyper-V，系统中会存在多个虚拟网卡，它们的 IP 地址段有时和校园网汇聚层格式相似，导致脚本误将虚拟 IP 当作 `wlanuserip` 发送。
 
-### 4.3 自动检测（两级回退）
+**最终方案：以 URL 解析为主，系统查询兜底。** URL 解析能一次性拿到 BaseURL、VLAN、MAC、AC 名称等全套参数；系统查询则用于在 URL 中的 IP 为 `0.0.0.0` 等异常情况下补全正确的本机 IP 和 MAC。
+
+### 4.2 重定向 URL 的结构
+
+当 AC 劫持 HTTP 请求并重定向时，浏览器的地址栏会出现类似这样的 URL：
 
 ```
-① GET http://www.qq.com (MaxRedirect=0)
-   └─ 若 302 → 从 Location 解析参数
-
-② GET http://172.18.252.12:6060 (MaxRedirect=0)
-   └─ 若 302 → 解析后用本地 IP/MAC 补全
-
-③ 手动粘贴 Portal URL
+http://172.18.252.12:6060/portal.do
+  ?wlanuserip=10.10.50.100
+  &wlanacname=XXGC-AC-01
+  &wlanacIp=172.18.252.1
+  &mac=AA:BB:CC:DD:EE:FF
+  &vlan=1050
+  &hostname=MYPC
+  &rand=123456
 ```
+
+脚本中的 `RedirectUrlParser` 类负责解析这个 URL，解析步骤为：
+
+1. **提取 BaseURL。** 用正则 `http://<host>/xxx.do` 匹配出认证服务器的地址和路径，然后将 `xxx.do` 替换为 `quickauth.do`，得到实际的认证请求端点。
+2. **拆解 Query String。** 按 `&` 分割得到参数对，再按 `=` 分割得到键和值。
+3. **字段映射。** 将 URL 参数名（如 `wlanuserip`）映射到脚本内部的配置字段。
+4. **MAC 标准化。** 将 MAC 地址统一转换为小写、冒号分隔的格式（`aa:bb:cc:dd:ee:ff`），避免因格式差异导致认证失败。
+
+### 4.3 自动检测：两级回退机制
+
+脚本启动后会依次尝试三种方式获取参数：
+
+```
+方法 ①：GET http://www.qq.com（设置 MaximumRedirection=0）
+         └─ AC 返回 302 重定向 → 从 Location 响应头提取 Portal URL → 解析参数
+         └─ 超时或失败 → 尝试方法 ②
+
+方法 ②：GET http://172.18.252.12:6060（设置 MaximumRedirection=0）
+         └─ AC 返回 302 重定向 → 解析 URL → 用本地获取的 IP/MAC 补全缺失字段
+         └─ 超时或失败 → 进入方法 ③
+
+方法 ③：弹出提示，让用户手动从浏览器地址栏复制 Portal URL 并粘贴到终端
+```
+
+> 方法 ① 和 ② 的核心技巧是设置 `-MaximumRedirection 0`，阻止 PowerShell 自动跟随重定向。这样我们才能在响应头中拿到 AC 返回的 Portal 地址，而不是直接被带到登录页面。
 
 ### 4.4 虚拟机网卡过滤
 
-虚拟机网卡（VirtualBox/VMware/Hyper-V）的 IP 格式与校园网汇聚层相似，会干扰 `wlanuserip` 获取。解决方案：`Get-NetAdapter` 过滤 `InterfaceDescription` 匹配 `Wi-Fi|Wireless|WLAN` 且 `Name` 不包含 `Virtual|VMware|Hyper-V|VirtualBox` 的活跃网卡。
+如前所述，虚拟网卡会干扰 IP 和 MAC 的获取。`NetworkInterfaceHelper` 在查询网卡时应用了严格的过滤条件：
+
+- `InterfaceDescription` 必须匹配 `Wi-Fi|Wireless|WLAN`
+- `Status` 必须为 `Up`
+- `Name` 不能包含 `Virtual`、`VMware`、`Hyper-V`、`VirtualBox` 等关键词
+
+只保留同时满足以上三个条件的第一个结果，确保拿到的是真实的物理无线网卡。
 
 ---
 
-## 5. 脚本实现
+## 5. 脚本核心实现
 
-### 5.1 核心思路
+### 5.1 通信方式：绕过浏览器
 
-放弃浏览器模拟（页面渲染 / Cookie / JS），仅用 `Invoke-WebRequest` 直接发 GET 请求。一次请求 → 一次响应解析。
+模拟浏览器的完整登录流程（打开页面 → 等待渲染 → 填写表单 → 管理 Cookie → 提交）会引入大量不必要的复杂度和故障点。
 
-### 5.2 配置管理
+本项目的 `xywdl.ps1` 直接使用 PowerShell 原生的 `Invoke-WebRequest` cmdlet 构造 HTTP GET 请求，全程不涉及任何浏览器环节：
 
-所有参数封装在 `NetworkConfig` 类中，固定参数通过 JSON 持久化。
+- 不加载页面，不执行 JavaScript
+- 不维护 Cookie 或 Session
+- 不解析 HTML DOM
+- 不需要 WebDriver 或 headless 浏览器
 
-### 5.3 标准化处理
+整个认证过程被精简为：**构造 URL → 发送 GET → 解析响应**。
 
-- `[Uri]::EscapeDataString()` 对含特殊字符的参数做 URL 编码
-- 每次请求生成新 UUID 和毫秒级时间戳
+### 5.2 配置结构化管理
 
-### 5.4 异常覆盖
+所有认证参数封装在 `NetworkConfig` 类中，与业务逻辑完全解耦。固定参数（如 BaseURL、AC 信息）通过 JSON 文件持久化存储，避免了散落在代码各处的硬编码字符串。用户首次配置后，后续运行无需重复输入。
 
-超时、DNS 失败、SSL 错误、4xx/5xx → 全链路捕获，输出结构化错误信息。
+### 5.3 请求参数标准化
+
+在拼接 Query String 之前，脚本对每个参数做了严格的标准化处理：
+
+- **URL 编码。** 用户名（含 `@`）、密码、主机名、AC 名称等可能包含特殊字符的值，统一调用 `[Uri]::EscapeDataString()` 进行百分号编码，防止参数被截断或解析错误。
+- **UUID 生成。** 每次认证请求生成一个新的 GUID，满足服务器端对请求唯一性的校验要求。
+- **毫秒级时间戳。** 使用高精度时间戳，避免同一秒内发出的多次请求被服务器去重机制误判为重复请求。
+
+### 5.4 全链路异常处理
+
+认证请求的每个环节都做了异常捕获，确保即使失败也能给出有意义的信息：
+
+- **网络层异常**：DNS 解析失败、连接超时、SSL/TLS 错误
+- **HTTP 层异常**：服务器返回 4xx 或 5xx 状态码
+- **响应解析异常**：返回内容格式不符合预期
+
+所有异常被统一捕获并输出结构化的错误描述，不会因为未处理的异常导致脚本崩溃。
 
 ---
 
-## 6. 安全设计
+## 6. 安全设计：凭证管理
 
-### 6.1 DPAPI 加密
+### 6.1 密码加密存储
 
-密码不落盘明文。存入 JSON 前经 Windows DPAPI 加密，解密后仅在内存中以 `SecureString` 形式短暂存在。
+用户密码**绝对不以明文形式写入磁盘**。整个加密和存储流程如下：
 
+**写入时：**
 ```
-输入 (Read-Host -AsSecureString)
-  → ConvertFrom-SecureString (DPAPI 加密)
-  → Base64 密文写入 JSON
-
-读取 (ConvertTo-SecureString)
-  → Marshal.SecureStringToBSTR (还原明文到内存)
-  → 使用后立即 FreeBSTR
+用户输入密码（Read-Host -AsSecureString，终端不回显）
+    ↓
+转换为 SecureString
+    ↓
+ConvertFrom-SecureString（调用 Windows DPAPI 加密）
+    ↓
+生成 Base64 格式的密文字符串
+    ↓
+存入 JSON 配置文件
 ```
 
-### 6.2 文件保护
+**读取时：**
+```
+从 JSON 读取 Base64 密文
+    ↓
+ConvertTo-SecureString（DPAPI 解密）
+    ↓
+Marshal.SecureStringToBSTR（还原为明文字符串到内存）
+    ↓
+使用完毕后立即 Marshal.FreeBSTR 释放内存
+```
 
-- 路径：`$env:APPDATA\xxgc_campus_net_config.txt`（隐藏属性）
-- DPAPI 绑定当前用户 + 机器，脱离原环境无法解密
+整个过程中，明文密码仅在内存中短暂存在，且使用后立即释放，不会残留在堆中。
+
+### 6.2 Windows DPAPI 的保护范围
+
+DPAPI（Data Protection API）是 Windows 操作系统内置的加密服务。默认情况下，加密密钥由当前用户的登录凭据和当前机器的硬件信息共同派生。这意味着：
+
+- **同一用户在同一台机器上**可以正常解密配置文件
+- **配置文件被复制到另一台机器**后无法解密
+- **另一个用户在同一台机器上登录**也无法解密
+
+这种绑定机制为本地凭证存储提供了操作系统级别的安全保障，无需应用程序自行管理加密密钥。
+
+### 6.3 文件层面的额外保护
+
+除了内容加密，配置文件本身也做了防护：
+
+- **文件属性设为隐藏**（`[System.IO.FileAttributes]::Hidden`），普通用户浏览目录时不可见
+- **存储路径放在 `$env:APPDATA` 目录下**，使用不起眼的文件名 `xxgc_campus_net_config.txt`
 
 ---
 
 ## 7. 认证响应码
 
-| code | 含义 |
-|------|------|
-| `0` | 成功 |
-| `1` | 账号不存在（检查学号和运营商） |
-| `44` | 非法接入（检查 VLAN/MAC） |
+认证服务器返回的 JSON 响应中，`code` 字段指示认证结果：
 
-兼容旧版非 JSON 响应：关键字匹配 `success` / `认证成功` / `账号不存在` / `非法接入`。
+| code | 含义 | 用户应检查 |
+|:----:|------|------------|
+| `0` | 认证成功，设备已获得外网访问权限 | — |
+| `1` | 账号不存在 | 学号是否正确、运营商是否选对 |
+| `44` | 非法接入 | VLAN ID 和 MAC 地址是否与当前网络环境匹配 |
+
+> 脚本同时兼容非 JSON 格式的旧版响应。如果返回的不是标准 JSON，则通过关键字匹配来判断结果——`success` 和 `认证成功` 视为通过，`账号不存在` 和 `非法接入` 视为失败。
 
 ---
 
-## 8. 连通性验证 —— 为什么用 204？
+## 8. 连通性验证：为什么用 204？
 
-### 8.1 问题
+### 8.1 认证成功不等于能上网
 
-认证服务器返回 `code: 0` 只说明**凭证校验通过**，不代表设备已有外网权限。AC 放行可能延迟、IP 绑定可能冲突。因此认证后必须验证外网连通性。
+认证服务器返回 `code: 0` 只代表**凭证校验在 RADIUS 端通过了**，并不等价于设备已经可以正常访问外网。实际中还可能遇到以下情况：
 
-### 8.2 为什么 HTTP 200 不可靠
+- AC 放行有延迟（RADIUS 计费报文从认证服务器同步到 AC 需要几秒）
+- 同一账号已在其他设备登录，IP/MAC 绑定冲突
+- 认证服务器返回成功，但 AC 因未知原因未执行放行动作
 
-校园网 AC 在未认证状态下会劫持所有 HTTP 请求，**返回的 Portal 登录页面本身也是 HTTP 200**。用 `status == 200` 判断"已上网"无法区分"Portal 假页面"和"真实网站"。
+因此，在收到认证成功响应之后，必须做一步额外的**外网连通性验证**，用事实而非状态码来确认设备确实通了。
 
-### 8.3 Captive Portal Detection
+### 8.2 HTTP 200 的陷阱
 
-业界的标准方案：请求一个**已知响应特征**的外部 URL，比对实际响应与预期。
+直觉上，发一个 HTTP 请求到百度之类的网站，如果返回 200 就说明能上网。但这个逻辑在校园网环境下是**不成立**的。
 
-| 系统 | 检测 URL | 预期响应 |
+原因在于：在设备尚未认证的状态下，AC 会劫持所有 HTTP 请求并返回 Portal 登录页面。**这个 Portal 页面本身的 HTTP 状态码就是 200 OK。** 也就是说：
+
+| 场景 | 你请求的 URL | 实际响应方 | HTTP 状态码 |
+|------|-------------|-----------|:-----------:|
+| 未认证 | `http://www.baidu.com` | AC（劫持后返回 Portal 页面） | 200 |
+| 已认证 | `http://www.baidu.com` | 百度服务器 | 200 |
+
+两边都是 200，仅凭状态码根本无法区分。你需要一个**不会被 AC 伪造的差异化信号**。
+
+### 8.3 业界的做法：Captive Portal Detection
+
+各大操作系统在检测强制门户（Captive Portal）时都采用了相同的思路——请求一个**响应特征已知且独特**的外部 URL，通过比较实际响应和预期特征来判断流量是否被劫持：
+
+| 系统 | 探测 URL | 预期特征 |
 |------|----------|----------|
-| Android | `connectivitycheck.gstatic.com/generate_204` | 204 |
-| Apple | `captive.apple.com/hotspot-detect.html` | 200 + `Success` |
-| Windows | `msftconnecttest.com/connecttest.txt` | 200 + `Microsoft Connect Test` |
+| Android | `http://connectivitycheck.gstatic.com/generate_204` | HTTP 204 No Content |
+| Apple | `http://captive.apple.com/hotspot-detect.html` | HTTP 200 + 正文为 `Success` |
+| Windows | `http://www.msftconnecttest.com/connecttest.txt` | HTTP 200 + 正文为 `Microsoft Connect Test` |
 
-### 8.4 本项目方案
+这些端点的共同特点是：它们的预期响应非常独特，AC 在劫持请求时返回的 Portal 页面在状态码或正文内容上与预期响应存在显著差异，从而可以被可靠地区分。
 
-使用 `http://connect.rom.miui.com/generate_204`（国内 CDN，延迟低），三层次判断：
+### 8.4 本项目的实现
+
+项目在 Rust 后端（`src-tauri/src/lib.rs` 中的 `check_url` 函数）实现了三层次的连通性判断：
+
+**层次一：检查 302 重定向**
+
+请求发出后如果收到了 3xx 重定向，检查 `Location` 头的内容。若其中包含 `portal`、`drcom`、`inode`、`eportal`、`srun`、`authserv` 等 Portal 系统关键词，则判定为**未认证**——请求仍然被 AC 劫持到了 Portal 页面。如果重定向目标不匹配这些关键词（比如正常的 CDN 跳转），则视为**已连通**。
+
+**层次二：检查 204 状态码**
+
+如果收到了 **HTTP 204 No Content**，直接判定为**已连通**。
+
+这是整个检测体系中最可靠的信号。原因很简单：校园网 AC 在劫持 HTTP 请求时，只会返回两种响应——HTTP 200（Portal 登录页面）或 HTTP 302（重定向到 Portal）。AC 绝对不会返回 204，因为 204 No Content 是一个应用层约定的语义（"请求成功，但没有响应体"），只有真正的目标服务器才会生成它。
+
+因此，**收到 204 = 请求确实到达了外网的真实服务器 = 设备已通过认证**。这一步不需要检查任何正文内容，不需要匹配任何关键词，204 本身就是铁证。
+
+**层次三：检查正文内容**
+
+如果收到了 HTTP 200（或其他 2xx），则需要进一步分析响应正文：
+
+- 正文包含 `drcom` / `inode` / `eportal` / `srun` / `portal认证` / `校园网认证` → **未认证**，当前看到的是 AC 返回的 Portal 页面
+- 正文包含 `百度一下` / `baidu` → **已连通**，请求确实到达了百度
+- 其他内容 → **已连通**（保守策略：不包含 Portal 特征的内容视为正常响应）
+
+### 8.5 完整检测流程
 
 ```
-第一层：302 重定向
-  Location 含 portal/drcom/inode/eportal/srun/authserv → ❌ 未认证
-  其他跳转 → ✅ 已连通
-
-第二层：204 No Content
-  HTTP 204 → ✅ 已连通（AC 绝不会返回 204，只有真实服务器才会）
-
-第三层：200 正文匹配
-  正文含 drcom/校园网认证/portal认证 → ❌ 未认证
-  正文含 百度一下/baidu → ✅ 已连通
-  其他 → ✅ 已连通（保守策略）
+开始检测
+  │
+  ├─ ① 请求 https://example.com/（禁止跟随重定向）
+  │    ├─ 204 或非 Portal 跳转 → ✅ 已连通，结束
+  │    └─ Portal 跳转 / 失败 → 继续 ②
+  │
+  └─ ② 请求 http://connect.rom.miui.com/generate_204（禁止跟随重定向）
+       ├─ 204 → ✅ 已连通
+       ├─ 302 + Portal 关键词 → ❌ 仍需登录
+       ├─ 200 + 正文含 Portal 关键词 → ❌ 仍需登录
+       └─ 200 + 正文不含 Portal 关键词 → ✅ 已连通
 ```
 
-**为什么 204 可靠？** 校园网 AC 劫持请求时只会返回 HTTP 200（Portal 页面）或 302（重定向），从不返回 204。204 是应用层约定状态码，只有目标服务器才会产生。收到 204 = 100% 确认请求到达了真实外网服务器。
+### 8.6 为什么用 MIUI 的端点而非 Google 的
 
-完整检测流程：
-
-```
-① GET https://example.com/ (no redirect)
-   ├─ 204/非Portal跳转 → ✅
-   └─ Portal跳转/失败 → ②
-
-② GET http://connect.rom.miui.com/generate_204 (no redirect)
-   ├─ 204 → ✅
-   ├─ 302+Portal关键词 → ❌
-   ├─ 200+Portal关键词 → ❌
-   └─ 其他 → ✅
-```
+虽然 Google 的 `gstatic.com/generate_204` 是 Android 系统的标准检测端点，但国内校园网环境下访问 Google 服务可能因 DNS 污染或 GFW 干扰导致请求超时（而非返回 204），引入不必要的误判。小米的 `connect.rom.miui.com` 部署在国内 CDN 上，延迟低、可用性高，更适合作为检测目标。
 
 ---
 
-## 附录：关键代码位置
+## 9. 附录：关键代码位置
 
-| 模块 | 文件 |
-|------|------|
-| 认证客户端（流程编排） | `xywdl.ps1` → `AuthenticationClient` |
+| 功能模块 | 文件与类/函数 |
+|----------|--------------|
+| 认证流程编排 | `xywdl.ps1` → `AuthenticationClient` |
 | 请求参数模型 | `xywdl.ps1` → `NetworkConfig` |
-| URL 解析 | `xywdl.ps1` → `RedirectUrlParser` |
+| 重定向 URL 解析 | `xywdl.ps1` → `RedirectUrlParser` |
 | 网卡信息获取 | `xywdl.ps1` → `NetworkInterfaceHelper` |
-| 凭证加密存储 | `xywdl.ps1` → `ConfigManager` |
-| 连通性检测 | `src-tauri/src/lib.rs` → `check_url()` |
-| 运营商配置 | `xywdl.ps1` → `DomainConfig` |
-| 前端界面 | `index.html` |
+| 凭证加密存储与读取 | `xywdl.ps1` → `ConfigManager` |
+| 运营商后缀映射 | `xywdl.ps1` → `DomainConfig` |
+| 外网连通性检测 | `src-tauri/src/lib.rs` → `check_url()` |
+| 桌面应用主逻辑 | `src-tauri/src/lib.rs` |
+| 前端用户界面 | `index.html`（HTML/CSS/JavaScript） |
