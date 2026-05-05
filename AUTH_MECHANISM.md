@@ -13,7 +13,8 @@
 5. [脚本实现原理](#5-脚本实现原理)
 6. [安全设计 —— 凭证管理](#6-安全设计--凭证管理)
 7. [响应码语义化处理](#7-响应码语义化处理)
-8. [方案演进：从 Python 到 PowerShell](#8-方案演进从-python-到-powershell)
+8. [连通性验证 —— 为什么用 204？](#8-连通性验证--为什么用-204)
+9. [附录：关键代码位置](#9-附录关键代码位置)
 
 ---
 
@@ -194,7 +195,7 @@ http://172.18.252.12:6060/portal.do?wlanuserip=10.10.50.100&wlanacname=XXGC-AC-0
 
 ### 5.1 核心通信 —— 跳过浏览器渲染
 
-传统 Python 方案使用 `requests` + `BeautifulSoup` 模拟浏览器完整流程（页面加载 → Cookie 管理 → 表单提交），每个环节都可能成为故障点。
+模拟浏览器完整流程（页面加载 → Cookie 管理 → 表单提交）意味着每个环节都可能成为故障点。
 
 本项目直接使用 `Invoke-WebRequest`（PowerShell 原生 cmdlet）构造 HTTP GET 请求，跳过：
 - 页面渲染
@@ -277,45 +278,103 @@ Marshal.SecureStringToBSTR (还原明文，仅存在于内存)
 
 ---
 
-## 8. 方案演进：从 Python 到 PowerShell
+## 8. 连通性验证 —— 为什么用 204？
 
-### 8.1 为什么放弃 Python
+### 8.1 问题：认证请求成功 ≠ 能上网
 
-最初使用 Python 实现，依赖库包括：
-- `requests` — HTTP 通信
-- `beautifulsoup4` — 页面解析
-- `netifaces` / `getmac` — 网卡信息获取
+认证服务器返回 `code: 0` 只能说明**凭证校验通过**，不能直接证明设备已获得外网访问权限。实际中还可能遇到：
+- AC 放行延迟（RADIUS 计费报文尚未生效）
+- IP 绑定冲突（同一账号已在其他设备登录）
+- 认证服务器返回成功但 AC 未执行放行动作
 
-**遇到的问题：**
-- **体积臃肿** — Python 解释器 + 依赖库打包后体积庞大
-- **环境依赖** — 需要在目标机器上安装 Python，或使用 PyInstaller 打包（触发杀软误报）
-- **Windows 集成差** — Python 原生不支持 Windows DPAPI、SecureString 等安全特性，需要额外 ctypes 调用
-- **浏览器模拟开销** — 模拟页面渲染、Cookie 管理等流程引入了不必要的复杂度
+因此，认证提交后必须做一步**连通性验证**，确认设备真正可以访问外网。
 
-### 8.2 PowerShell 方案的优势
+### 8.2 为什么不能用普通的 HTTP 200 来判断
 
-| 维度 | Python 方案 | PowerShell 方案 |
-|------|-------------|-----------------|
-| **环境依赖** | 需安装 Python 解释器 | Windows 系统内置（PS 5.1+） |
-| **DPAPI 加密** | 需 ctypes 调用 Win32 API | 原生 `ConvertFrom-SecureString` |
-| **网络命令** | `requests` 库 | 原生 `Invoke-WebRequest` |
-| **网卡查询** | `netifaces` (第三方) | 原生 `Get-NetAdapter` |
-| **部署体积** | ~50MB+（含解释器） | 纯脚本 <30KB |
-| **安全性** | 手动实现密码保护 | `SecureString` + DPAPI 原生支持 |
-| **启动速度** | Python 解释器冷启动 ~1-2s | PowerShell 即时执行 |
+在校园网环境中，**无论设备有没有通过认证，任意 HTTP 请求都会收到 HTTP 200 响应**：
 
-### 8.3 项目现状
+| 场景 | 实际响应 | HTTP 状态码 |
+|------|----------|-------------|
+| **未认证** | AC 劫持请求，返回 Portal 登录页面 | **200 OK** |
+| **已认证** | 请求到达真实目标服务器 | 200 / 204 / 301 等 |
 
-当前项目已发展为 **Tauri 桌面应用**（Rust 后端 + Web 前端），PowerShell 脚本（`xywdl.ps1`）作为认证执行引擎被 Tauri 应用通过子进程调用，实现了：
+这就是问题所在：**Portal 登录页面本身就是 200 OK**。如果你访问 `http://www.baidu.com` 并检查 `status == 200`，那么无论是登录前还是登录后都会得到 200——前者是 AC 返回的假页面，后者才是百度真的页面。用 HTTP 200 作为"已上网"的判断标准是**不可靠**的。
 
-- **GUI 操作** — 用户选择 WiFi、配置账号
-- **系统托盘常驻** — 后台监控网络状态
-- **自动重连** — 断网自动重连 WiFi + 重新认证
-- **开机自启** — 无需用户手动操作
+### 8.3 解决思路：Captive Portal Detection
+
+业界标准方案是 **Captive Portal Detection**（强制门户检测），核心思路是：
+
+> 请求一个**已知响应特征**的外部 URL，将实际响应与预期特征对比。如果匹配，说明请求到达了真实服务器（已认证）；如果不匹配，说明被 AC 劫持（未认证）。
+
+主流操作系统都在使用这个机制：
+
+| 系统 | 检测 URL | 预期响应 |
+|------|----------|----------|
+| **Android** | `http://connectivitycheck.gstatic.com/generate_204` | 204 No Content |
+| **Apple** | `http://captive.apple.com/hotspot-detect.html` | 200 + 正文 `Success` |
+| **Windows** | `http://www.msftconnecttest.com/connecttest.txt` | 200 + 正文 `Microsoft Connect Test` |
+| **MIUI** | `http://connect.rom.miui.com/generate_204` | 204 No Content |
+
+### 8.4 本项目采用的方案
+
+本项目使用 `http://connect.rom.miui.com/generate_204` 作为连通性验证端点，配合多级回退判断逻辑（`check_url` 函数，位于 `src-tauri/src/lib.rs`）：
+
+#### 第一层：重定向分析
+
+若收到 **3xx 重定向**，检查 `Location` 头中是否包含 Portal 关键词（`portal`, `drcom`, `inode`, `eportal`, `srun`, `authserv` 等）：
+
+```
+HTTP 302 → Location: http://172.18.252.12:6060/portal.do?...
+          → 判定：未认证（被 AC 劫持到 Portal）
+```
+
+若 `Location` 不匹配这些关键词（比如正常的 CDN 跳转），则视为已连通。
+
+#### 第二层：204 状态码
+
+若收到 **204 No Content**，直接判定为已连通。这是最干净、最可靠的信号：
+
+```
+HTTP 204 → 已认证（请求确实到达了 miui.com 的 generate_204 端点）
+```
+
+**为什么 204 可靠？** 因为校园网 AC 在劫持 HTTP 请求时，**只会返回 200（Portal 页面）或 302（重定向到 Portal）**，绝对不会返回 204。204 是一个应用层约定的特殊状态码，只有真正的目标服务器才会返回它。因此：
+
+- **收到 204** → 100% 确认已通过认证，设备可以正常上网
+- **收到 200** → 需要进一步检查正文内容（是 Portal 页面还是正常网页）
+
+#### 第三层：正文关键词匹配
+
+若收到 **200 OK**（或其他 2xx），检查响应正文：
+
+| 正文包含 | 判定 |
+|----------|------|
+| `drcom` / `inode` / `eportal` / `srun` / `portal认证` / `校园网认证` / `校园网登录` | **未认证**（正文是 Portal 登录页面） |
+| `百度一下` / `baidu` / `百度` | **已认证**（请求到达了真实百度） |
+| 其他内容 | **已认证**（保守策略，不明内容视为已连通） |
+
+### 8.5 完整的连通性检测流程
+
+```
+开始检测
+    │
+    ├─① 请求 https://example.com/（禁止跟随重定向）
+    │   ├─ 204 → ✅ 已连通
+    │   ├─ 302 + Portal关键词 → ❌ 需登录
+    │   └─ 其他/失败 → 进入②
+    │
+    └─② 请求 http://connect.rom.miui.com/generate_204（禁止跟随重定向）
+        ├─ 204 → ✅ 已连通
+        ├─ 302 + Portal关键词 → ❌ 需登录
+        ├─ 200 + Portal正文关键词 → ❌ 需登录
+        └─ 200 + 非Portal正文 → ✅ 已连通
+```
+
+> **设计考量**：选择 MIUI 的 `generate_204` 端点而非 Google 的 `gstatic.com`，是因为在国内校园网环境下，访问 Google 服务可能因 DNS 污染或防火墙导致超时，而 `rom.miui.com` 是国内 CDN，延迟低、可用性高。
 
 ---
 
-## 附录：关键代码位置
+## 9. 附录：关键代码位置
 
 | 模块 | 文件 | 核心功能 |
 |------|------|----------|
@@ -325,5 +384,6 @@ Marshal.SecureStringToBSTR (还原明文，仅存在于内存)
 | 网卡辅助 | `xywdl.ps1` → `NetworkInterfaceHelper` | Wi-Fi IP/MAC/SSID 获取 |
 | 配置持久化 | `xywdl.ps1` → `ConfigManager` | JSON 配置的读写与加密 |
 | 运营商配置 | `xywdl.ps1` → `DomainConfig` | 运营商后缀映射 |
+| 连通性检测 | `src-tauri/src/lib.rs` → `check_url()` | Captive Portal 检测与多级回退 |
 | Tauri 后端 | `src-tauri/src/lib.rs` | 桌面应用主逻辑（Rust） |
 | 前端界面 | `index.html` | Web UI（HTML/CSS/JS） |
