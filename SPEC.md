@@ -24,7 +24,7 @@
 
 3. **网络状态监控**
    - 每15秒检测一次网络连通性
-   - 使用ping检测：baidu.com 和 qq.com
+   - 使用 HTTP 重定向检测：https://example.com/ 和 http://connect.rom.miui.com/generate_204
    - 检测WiFi是否已连接
 
 4. **自动重连机制**
@@ -71,7 +71,7 @@
   "primary_ssid": "主网络名称",
   "backup_ssid": "备用网络名称",
   "check_interval": 15,
-  "test_hosts": ["baidu.com", "qq.com"]
+  "test_hosts": ["https://example.com/", "http://connect.rom.miui.com/generate_204"]
 }
 ```
 
