@@ -83,7 +83,7 @@ impl Default for Config {
             primary_ssid: String::new(),
             backup_ssid: String::new(),
             check_interval: 15,
-            test_hosts: vec!["baidu.com".to_string(), "qq.com".to_string()],
+            test_hosts: vec!["https://example.com/".to_string(), "http://connect.rom.miui.com/generate_204".to_string()],
         }
     }
 }
