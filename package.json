@@ -1,6 +1,6 @@
 {
   "name": "campus-wifi",
-  "version": "1.2.0",
+  "version": "1.6.0",
   "description": "校园网自动重连工具",
   "scripts": {
     "dev": "vite",
