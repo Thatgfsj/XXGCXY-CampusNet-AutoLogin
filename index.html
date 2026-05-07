@@ -583,47 +583,74 @@
         }
         
         // 重新连接WiFi
+        // 重新连接WiFi（含信号强度比较逻辑）
         async function reconnectWifi() {
             let connectedSsid = null;
-            
-            // 尝试连接主网络
-            if (config.primary_ssid) {
-                addLog('正在连接主网络: ' + config.primary_ssid);
-                try {
-                    await invoke('connect_wifi', { ssid: config.primary_ssid });
-                    await sleep(4000);  // 等待连接完成
-                    
-                    // 检查是否真的连接上了
-                    const status = await invoke('check_network');
-                    if (status.wifi_connected === config.primary_ssid) {
-                        addLog('已连接到: ' + config.primary_ssid);
-                        connectedSsid = config.primary_ssid;
-                    }
-                } catch (e) {
-                    addLog('连接主网络失败: ' + e);
-                }
-            } else {
+
+            if (!config.primary_ssid) {
                 addLog('未配置主网络');
+                return;
             }
-            
-            // 如果主网络没连上，尝试备用网络
-            if (!connectedSsid && config.backup_ssid) {
-                addLog('尝试备用网络: ' + config.backup_ssid);
+
+            // 扫描网络，获取信号强度
+            let signalPrimary = 0;
+            let signalBackup = 0;
+            try {
+                const networks = await invoke('scan_wifi');
+                for (const net of networks) {
+                    if (net.ssid === config.primary_ssid) signalPrimary = net.signal;
+                    if (net.ssid === config.backup_ssid) signalBackup = net.signal;
+                }
+                addLog(`信号强度 — 主: ${signalPrimary}%  备用: ${signalBackup}%`);
+            } catch (e) {
+                addLog('扫描WiFi失败: ' + e);
+            }
+
+            // 决定连接顺序：主网络信号<40%且备用信号更高 → 先用备用
+            const useBackupFirst = config.backup_ssid
+                && signalPrimary < 40
+                && signalBackup > signalPrimary;
+
+            const firstSsid = useBackupFirst ? config.backup_ssid : config.primary_ssid;
+            const secondSsid = useBackupFirst ? config.primary_ssid : config.backup_ssid;
+
+            if (useBackupFirst) {
+                addLog(`主网络信号弱(${signalPrimary}%)，优先连接备用: ${firstSsid}`);
+            }
+
+            // 尝试连接第一个网络
+            addLog('正在连接: ' + firstSsid);
+            try {
+                await invoke('connect_wifi', { ssid: firstSsid });
+                await sleep(4000);
+
+                const status = await invoke('check_network');
+                if (status.wifi_connected === firstSsid) {
+                    addLog('已连接到: ' + firstSsid);
+                    connectedSsid = firstSsid;
+                }
+            } catch (e) {
+                addLog(`连接 ${firstSsid} 失败: ` + e);
+            }
+
+            // 第一个没连上，尝试第二个
+            if (!connectedSsid && secondSsid) {
+                addLog('正在连接: ' + secondSsid);
                 try {
-                    await invoke('connect_wifi', { ssid: config.backup_ssid });
+                    await invoke('connect_wifi', { ssid: secondSsid });
                     await sleep(4000);
-                    
+
                     const status = await invoke('check_network');
-                    if (status.wifi_connected === config.backup_ssid) {
-                        addLog('已连接到: ' + config.backup_ssid);
-                        connectedSsid = config.backup_ssid;
+                    if (status.wifi_connected === secondSsid) {
+                        addLog('已连接到: ' + secondSsid);
+                        connectedSsid = secondSsid;
                     }
                 } catch (e) {
-                    addLog('连接备用网络失败: ' + e);
+                    addLog(`连接 ${secondSsid} 失败: ` + e);
                 }
             }
-            
-            // 只有确认WiFi连接成功后，才尝试登录
+
+            // WiFi连接成功后，检查是否需要登录
             if (connectedSsid) {
                 addLog('WiFi已连接，检查网络状态...');
                 const status = await invoke('check_network');
