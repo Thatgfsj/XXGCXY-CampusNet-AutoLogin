@@ -83,7 +83,7 @@ impl Default for Config {
             primary_ssid: String::new(),
             backup_ssid: String::new(),
             check_interval: 15,
-            test_hosts: vec!["https://example.com/".to_string(), "http://connect.rom.miui.com/generate_204".to_string()],
+            test_hosts: vec!["http://connect.rom.miui.com/generate_204".to_string(), "https://example.com/".to_string()],
         }
     }
 }
@@ -119,12 +119,12 @@ pub struct AppState {
 
 #[tauri::command]
 fn get_check_enabled(state: tauri::State<'_, AppState>) -> bool {
-    *state.check_enabled.lock().unwrap()
+    *state.check_enabled.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[tauri::command]
 fn toggle_check_enabled(state: tauri::State<'_, AppState>) -> bool {
-    let mut enabled = state.check_enabled.lock().unwrap();
+    let mut enabled = state.check_enabled.lock().unwrap_or_else(|e| e.into_inner());
     *enabled = !*enabled;
     *enabled
 }
@@ -224,10 +224,10 @@ fn load_config(state: tauri::State<'_, AppState>) -> Result<Config, String> {
             fs::read_to_string(&config_path).map_err(|e| format!("读取配置文件失败: {}", e))?;
         let config: Config =
             serde_json::from_str(&content).map_err(|e| format!("解析配置文件失败: {}", e))?;
-        let mut current_config = state.config.lock().unwrap();
+        let mut current_config = state.config.lock().unwrap_or_else(|e| e.into_inner());
         *current_config = config.clone();
         if !config.primary_ssid.is_empty() {
-            let mut first_run = state.first_run.lock().unwrap();
+            let mut first_run = state.first_run.lock().unwrap_or_else(|e| e.into_inner());
             *first_run = false;
         }
         Ok(config)
@@ -243,9 +243,9 @@ fn save_config(config: Config, state: tauri::State<'_, AppState>) -> Result<(), 
         .map_err(|e| format!("序列化配置失败: {}", e))?;
     fs::write(&config_path, content)
         .map_err(|e| format!("写入配置文件失败: {}", e))?;
-    let mut current_config = state.config.lock().unwrap();
+    let mut current_config = state.config.lock().unwrap_or_else(|e| e.into_inner());
     *current_config = config;
-    let mut first_run = state.first_run.lock().unwrap();
+    let mut first_run = state.first_run.lock().unwrap_or_else(|e| e.into_inner());
     *first_run = false;
     Ok(())
 }
@@ -259,7 +259,7 @@ async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
         let _ = hidden_command("netsh")
             .args(["wlan", "scan"])
             .output();
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         let output = hidden_command("netsh")
             .args(["wlan", "show", "networks", "mode=bssid"])
             .output()
@@ -400,20 +400,22 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
         let _ = hidden_command("netsh")
             .args(["wlan", "disconnect"])
             .output();
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        // 先尝试直接用 ssid 连接
+        // netsh wlan connect 需要 name= 参数（配置文件名），ssid= 不能单独使用
         let output = hidden_command("netsh")
-            .args(["wlan", "connect", &format!("ssid={}", ssid)])
+            .args(["wlan", "connect", &format!("name={}", ssid)])
             .output()
             .map_err(|e| format!("执行连接命令失败: {}", e))?;
 
         if output.status.success() {
-            std::thread::sleep(std::time::Duration::from_secs(3));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             return Ok(());
         }
 
-        // 如果连接失败，尝试创建开放网络配置文件后再连接
+        // 如果配置文件不存在，创建开放网络配置文件后导入
+        let escaped_ssid = ssid.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+            .replace('"', "&quot;").replace(''', "&apos;");
         let profile_xml = format!(
             r#"<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
@@ -435,7 +437,7 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
         </security>
     </MSM>
 </WLANProfile>"#,
-            ssid = ssid
+            ssid = escaped_ssid
         );
 
         // 写入临时文件
@@ -447,21 +449,24 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
         let profile_path_str = profile_path.to_string_lossy().to_string();
 
         // 导入配置文件
-        let _ = hidden_command("netsh")
+        let add_result = hidden_command("netsh")
             .args(["wlan", "add", "profile", &format!("filename={}", profile_path_str)])
             .output();
+        if let Err(e) = &add_result {
+            log::warn!("导入WLAN配置文件失败: {e}");
+        }
 
         // 清理临时文件
         let _ = fs::remove_file(&profile_path);
 
-        // 再次尝试连接
+        // 再次尝试连接（使用 name=）
         let output2 = hidden_command("netsh")
-            .args(["wlan", "connect", &format!("ssid={}", ssid)])
+            .args(["wlan", "connect", &format!("name={}", ssid)])
             .output()
             .map_err(|e| format!("执行连接命令失败: {}", e))?;
 
         if output2.status.success() {
-            std::thread::sleep(std::time::Duration::from_secs(3));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output2.stderr).to_string();
@@ -477,7 +482,7 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
             .output()
             .map_err(|e| format!("执行连接命令失败: {}", e))?;
         if output.status.success() {
-            std::thread::sleep(std::time::Duration::from_secs(3));
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -546,12 +551,13 @@ fn get_connected_wifi() -> Option<String> {
 // ============= 检测互联网连接 =============
 
 async fn check_internet() -> bool {
-    match check_url("https://example.com/").await {
+    // 优先使用 HTTP 检测（避免 HTTPS 绕过 captive portal）
+    match check_url("http://connect.rom.miui.com/generate_204").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
     }
-    match check_url("http://connect.rom.miui.com/generate_204").await {
+    match check_url("https://example.com/").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
@@ -592,8 +598,10 @@ async fn check_url(url: &str) -> CheckResult {
                         || loc_lower.contains("srun")
                         || loc_lower.contains("authserv")
                         || loc_lower.contains("1x")
+                        || loc_lower.contains("wlanuserip")
+                        || loc_lower.contains("ntdks")
                         || (loc_lower.contains("edu") && loc_lower.contains("login"))
-                        || (loc_lower.contains("login") && !loc_lower.contains("baidu"))
+                        || (loc_lower.contains("login") && (loc_lower.contains("auth") || loc_lower.contains("portal") || loc_lower.contains("redirect")))
                     {
                         return CheckResult::NeedLogin;
                     }
@@ -605,12 +613,16 @@ async fn check_url(url: &str) -> CheckResult {
             return CheckResult::Connected;
         }
         if status.is_success() {
-            if let Ok(content) = response.text() {
-                let content_lower = content.to_lowercase();
+            use std::io::Read;
+            let mut limited = response.take(8192);
+            let mut body = String::new();
+            if limited.read_to_string(&mut body).is_ok() {
+                let content_lower = body.to_lowercase();
                 if content_lower.contains("drcom")
                     || content_lower.contains("inode")
                     || content_lower.contains("eportal")
                     || content_lower.contains("srun")
+                    || content_lower.contains("wlanuserip")
                     || content_lower.contains("portal认证")
                     || content_lower.contains("校园网认证")
                     || content_lower.contains("校园网登录")
@@ -640,7 +652,7 @@ async fn check_url(url: &str) -> CheckResult {
 
 #[tauri::command]
 async fn check_network(state: tauri::State<'_, AppState>) -> Result<NetworkStatus, String> {
-    let config = state.config.lock().unwrap().clone();
+    let config = state.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let wifi_connected = get_connected_wifi();
     let internet_ok = check_internet().await;
     let needs_reconnect = wifi_connected.is_none()
@@ -649,8 +661,8 @@ async fn check_network(state: tauri::State<'_, AppState>) -> Result<NetworkStatu
             && wifi_connected.as_ref() != Some(&config.backup_ssid));
     let needs_login = wifi_connected.is_some()
         && !internet_ok
-        && (config.primary_ssid.is_empty()
-            || wifi_connected.as_ref() == Some(&config.primary_ssid)
+        && !config.primary_ssid.is_empty()
+        && (wifi_connected.as_ref() == Some(&config.primary_ssid)
             || wifi_connected.as_ref() == Some(&config.backup_ssid));
     Ok(NetworkStatus {
         wifi_connected,
@@ -713,7 +725,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
         let shell = app.shell();
         let output = shell
             .command("cmd")
-            .args(["/c", "start", "/wait", &script_path.to_string_lossy()])
+            .args(["/c", &script_path.to_string_lossy()])
             .output()
             .await
             .map_err(|e| format!("执行登录脚本失败: {}", e))?;
