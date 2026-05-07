@@ -377,29 +377,96 @@ async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
     }
 }
 
+// ============= 获取 WiFi 信号强度 =============
+
+#[tauri::command]
+async fn get_wifi_signal(ssid: String) -> Result<u8, String> {
+    let networks = scan_wifi().await?;
+    for net in &networks {
+        if net.ssid == ssid {
+            return Ok(net.signal);
+        }
+    }
+    Ok(0)
+}
+
 // ============= 连接 WiFi（跨平台） =============
 
 #[tauri::command]
 async fn connect_wifi(ssid: String) -> Result<(), String> {
     #[cfg(windows)]
     {
-        // 先断开当前连接（如果有）
+        // 先断开当前连接
         let _ = hidden_command("netsh")
             .args(["wlan", "disconnect"])
             .output();
         std::thread::sleep(std::time::Duration::from_secs(1));
 
-        let name_arg = format!("name={}", ssid);
+        // 先尝试直接用 ssid 连接
         let output = hidden_command("netsh")
-            .args(["wlan", "connect", &name_arg])
+            .args(["wlan", "connect", &format!("ssid={}", ssid)])
             .output()
             .map_err(|e| format!("执行连接命令失败: {}", e))?;
+
         if output.status.success() {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            return Ok(());
+        }
+
+        // 如果连接失败，尝试创建开放网络配置文件后再连接
+        let profile_xml = format!(
+            r#"<?xml version="1.0"?>
+<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
+    <name>{ssid}</name>
+    <SSIDConfig>
+        <SSID>
+            <name>{ssid}</name>
+        </SSID>
+    </SSIDConfig>
+    <connectionType>ESS</connectionType>
+    <connectionMode>auto</connectionMode>
+    <MSM>
+        <security>
+            <authEncryption>
+                <authentication>open</authentication>
+                <encryption>none</encryption>
+                <useOneX>false</useOneX>
+            </authEncryption>
+        </security>
+    </MSM>
+</WLANProfile>"#,
+            ssid = ssid
+        );
+
+        // 写入临时文件
+        let tmp_dir = std::env::temp_dir();
+        let profile_path = tmp_dir.join(format!("xxgcxy_wifi_{}.xml", ssid));
+        fs::write(&profile_path, &profile_xml)
+            .map_err(|e| format!("创建配置文件失败: {}", e))?;
+
+        let profile_path_str = profile_path.to_string_lossy().to_string();
+
+        // 导入配置文件
+        let _ = hidden_command("netsh")
+            .args(["wlan", "add", "profile", &format!("filename={}", profile_path_str)])
+            .output();
+
+        // 清理临时文件
+        let _ = fs::remove_file(&profile_path);
+
+        // 再次尝试连接
+        let output2 = hidden_command("netsh")
+            .args(["wlan", "connect", &format!("ssid={}", ssid)])
+            .output()
+            .map_err(|e| format!("执行连接命令失败: {}", e))?;
+
+        if output2.status.success() {
             std::thread::sleep(std::time::Duration::from_secs(3));
             Ok(())
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Err(format!("连接 WiFi 失败: {}", stderr))
+            let stderr = String::from_utf8_lossy(&output2.stderr).to_string();
+            let stdout = String::from_utf8_lossy(&output2.stdout).to_string();
+            Err(format!("连接 WiFi 失败: {} {}", stderr, stdout))
         }
     }
 
@@ -780,6 +847,7 @@ pub fn run() {
             save_config,
             scan_wifi,
             connect_wifi,
+            get_wifi_signal,
             check_network,
             run_login_script,
             get_check_enabled,
