@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.6.0"
+version = "1.6.4"
 description = "校园网自动登录助手"
 authors = ["Thatgfsj"]
 license = "MIT"

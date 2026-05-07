@@ -335,7 +335,6 @@
                 <span class="info-value"><span id="intervalDisplay">15</span>秒</span>
             </div>
         </div>
-        
         <button class="btn btn-primary" id="checkNowBtn" onclick="checkNow()">
             🔄 立即检测网络
         </button>
@@ -396,15 +395,7 @@
             <input type="number" class="interval-input" id="intervalInput" min="5" max="300" value="15">
         </div>
 
-        <div class="info-row" style="margin-top: 10px;">
-            <span class="info-label">检测地址1:</span>
-            <input type="text" class="interval-input" id="testHost1" placeholder="https://example.com/">
-        </div>
-        <div class="info-row">
-            <span class="info-label">检测地址2:</span>
-            <input type="text" class="interval-input" id="testHost2" placeholder="http://connect.rom.miui.com/generate_204">
-        </div>
-
+        
         <div class="btn-group">
             <button class="btn btn-secondary" onclick="showMain()">返回</button>
             <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
@@ -418,7 +409,7 @@
             primary_ssid: '',
             backup_ssid: '',
             check_interval: 15,
-            test_hosts: ['https://example.com/', 'http://connect.rom.miui.com/generate_204']
+            test_hosts: ['http://connect.rom.miui.com/generate_204', 'https://example.com/']
         };
         
         let wifiNetworks = [];
@@ -514,8 +505,7 @@
             document.getElementById('backupWifi').textContent = config.backup_ssid || '未设置';
             document.getElementById('intervalDisplay').textContent = config.check_interval;
             document.getElementById('intervalInput').value = config.check_interval;
-            document.getElementById('testHost1').value = config.test_hosts[0] || '';
-            document.getElementById('testHost2').value = config.test_hosts[1] || '';
+
         }
         
         // 检测网络状态
@@ -583,7 +573,6 @@
             }
         }
         
-        // 重新连接WiFi
         // 重新连接WiFi（含信号强度比较逻辑）
         async function reconnectWifi() {
             let connectedSsid = null;
@@ -807,10 +796,7 @@
             config.primary_ssid = selectedPrimary;
             config.backup_ssid = selectedBackup;
             config.check_interval = interval;
-            config.test_hosts = [
-                document.getElementById('testHost1').value.trim() || 'https://example.com/',
-                document.getElementById('testHost2').value.trim() || 'http://connect.rom.miui.com/generate_204'
-            ];
+            // 使用默认检测地址（generate_204 优先）
             
             try {
                 await invoke('save_config', { config: config });
