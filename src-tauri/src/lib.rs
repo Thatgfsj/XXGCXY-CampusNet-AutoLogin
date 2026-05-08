@@ -423,7 +423,7 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
 
         // 如果配置文件不存在，创建开放网络配置文件后导入
         let escaped_ssid = ssid.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-            .replace('"', "&quot;").replace(''', "&apos;");
+            .replace('"', "&quot;").replace('\'', "&apos;");
         let profile_xml = format!(
             r#"<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
