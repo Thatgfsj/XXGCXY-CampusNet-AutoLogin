@@ -34,6 +34,12 @@ jobs:
         run: |
           npm run tauri build -- --bundles deb
 
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: src-tauri/target/release/bundle/deb/*.deb
+
       - name: Upload .deb to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
