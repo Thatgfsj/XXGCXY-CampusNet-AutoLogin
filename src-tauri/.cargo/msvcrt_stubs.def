@@ -1,0 +1,6 @@
+LIBRARY msvcrt.dll
+EXPORTS
+    _tls_index DATA
+    _tls_used DATA
+    _CxxThrowException
+    _fltused DATA

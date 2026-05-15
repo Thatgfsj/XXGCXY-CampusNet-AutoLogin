@@ -1,0 +1,4 @@
+EXPORTS
+    _tls_index DATA
+    _tls_used DATA
+    _fltused DATA

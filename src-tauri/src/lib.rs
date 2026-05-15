@@ -83,7 +83,7 @@ impl Default for Config {
             primary_ssid: String::new(),
             backup_ssid: String::new(),
             check_interval: 15,
-            test_hosts: vec!["http://connect.rom.miui.com/generate_204".to_string(), "https://example.com/".to_string()],
+            test_hosts: vec!["http://connect.rom.miui.com/generate_204".to_string(), "http://httpstat.us/204".to_string()],
         }
     }
 }
@@ -557,7 +557,7 @@ async fn check_internet() -> bool {
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
     }
-    match check_url("https://example.com/").await {
+    match check_url("http://httpstat.us/204").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
@@ -773,8 +773,9 @@ async fn open_github(app: AppHandle) -> Result<(), String> {
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
     let check_item = MenuItem::with_id(app, "check", "立即检测", true, None::<&str>)?;
+    let login_item = MenuItem::with_id(app, "login", "执行登录脚本", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &check_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&show_item, &check_item, &login_item, &quit_item])?;
     let icon = app.default_window_icon().cloned();
     let mut tray_builder = TrayIconBuilder::new()
         .menu(&menu)
@@ -789,6 +790,11 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             "check" => {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.emit("check_network", ());
+                }
+            }
+            "login" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("run_login", ());
                 }
             }
             "quit" => {

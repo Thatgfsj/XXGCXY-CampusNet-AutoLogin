@@ -1,0 +1,5 @@
+[target.x86_64-pc-windows-gnu]
+linker = "C:/llvm-mingw/llvm-mingw-20260505-msvcrt-x86_64/bin/x86_64-w64-mingw32-clang.exe"
+rustflags = [
+    "--cfg", "fast_arithmetic=\"64\"",
+]

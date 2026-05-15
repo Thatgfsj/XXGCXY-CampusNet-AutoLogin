@@ -404,6 +404,7 @@
 
     <script type="module">
         import { invoke } from '@tauri-apps/api/core';
+        import { listen } from '@tauri-apps/api/event';
         
         let config = {
             primary_ssid: '',
@@ -438,8 +439,20 @@
             } catch (e) {
                 console.log('获取自启动状态失败');
             }
+            // 监听托盘菜单事件
+            await listen('check_network', async () => {
+                addLog('托盘菜单触发：立即检测');
+                document.getElementById('statusIcon').textContent = '⏳';
+                document.getElementById('statusText').textContent = '检测中...';
+                await checkNetwork();
+            });
+            await listen('run_login', async () => {
+                addLog('托盘菜单触发：执行登录脚本');
+                await runLoginScript();
+            });
+
             await checkNetwork();
-            
+
             // 启动定时检测
             startCheckInterval();
         };
@@ -534,7 +547,7 @@
                 if (status.needs_login) {
                     // 检查是否刚登录过（10秒内）
                     const now = Date.now();
-                    if (now - lastLoginTime < 10000) {
+                    if (now - lastLoginTime < 5000) {
                         console.log('刚登录过，跳过重复登录');
                         return;
                     }
@@ -682,11 +695,14 @@
                 }
             } catch (e) {
                 addLog('登录失败: ' + e);
+                isLoggingIn = false;  // 失败时立即重置，允许重试
             } finally {
-                // 延迟重置登录状态，防止立即重试
-                setTimeout(() => {
-                    isLoggingIn = false;
-                }, 5000);
+                // 只有登录成功时才延迟重置，防止短时间内重复登录
+                if (isLoggingIn) {
+                    setTimeout(() => {
+                        isLoggingIn = false;
+                    }, 5000);
+                }
             }
         }
         
