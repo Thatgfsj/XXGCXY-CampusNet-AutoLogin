@@ -39,7 +39,8 @@
     "resources": [
       "../xywdl.ps1",
       "../xywdl.bat",
-      "../xywdl.sh"
+      "../xywdl.sh",
+      "bin/WebView2Loader.dll"
     ],
     "windows": {
       "webviewInstallMode": {
