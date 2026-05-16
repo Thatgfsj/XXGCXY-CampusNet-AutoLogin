@@ -40,7 +40,8 @@
       "../xywdl.ps1",
       "../xywdl.bat",
       "../xywdl.sh",
-      "bin/_pw7_/*"
+      "bin/_pw7_/*",
+      "bin/WebView2Loader.dll"
     ],
     "linux": {
       "appimage": {
