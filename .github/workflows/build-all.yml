@@ -20,12 +20,25 @@ jobs:
           lfs: true
           fetch-depth: 0
 
-      - name: Fetch _pw7_ from win-portable branch
+      - name: Fetch _pw7_ from win-portable branch (LFS)
         shell: pwsh
         run: |
           git fetch origin win-portable --depth=1
           git checkout origin/win-portable -- src-tauri/bin/_pw7_/
-          Write-Host "_pw7_ 目录已从 win-portable 分支获取，文件数：$( (Get-ChildItem -Recurse src-tauri/bin/_pw7_).Count )"
+          # LFS 指针文件刚被检出，需要拉取真实 LFS 对象并填充
+          git lfs fetch origin win-portable
+          git lfs checkout
+          # 验证：检查 pwsh.exe 是否真的是二进制
+          $pwsh = Get-Item src-tauri/bin/_pw7_/pwsh.exe -ErrorAction SilentlyContinue
+          if ($pwsh -and $pwsh.Length -gt 100000) {
+            Write-Host "_pw7_/pwsh.exe 已正确拉取 (LFS smudged): $($pwsh.Length) bytes"
+          } else {
+            $len = if ($pwsh) { $pwsh.Length } else { 0 }
+            Write-Host "WARNING: _pw7_/pwsh.exe 可能未正确拉取 (LFS pointer?): $len bytes"
+            exit 1
+          }
+          $totalSize = (Get-ChildItem -Recurse src-tauri/bin/_pw7_/ | Measure-Object -Property Length -Sum).Sum
+          Write-Host "_pw7_ 总大小: $([math]::Round($totalSize / 1MB, 2)) MB"
 
       - name: Setup Node
         uses: actions/setup-node@v4
