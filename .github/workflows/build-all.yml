@@ -38,6 +38,15 @@ jobs:
           $totalSize = (Get-ChildItem -Recurse src-tauri/bin/_pw7_/ | Measure-Object -Property Length -Sum).Sum
           Write-Host "_pw7_ 总大小: $([math]::Round($totalSize / 1MB, 2)) MB"
 
+      - name: Add _pw7_ to tauri.conf.json resources
+        shell: pwsh
+        run: |
+          $confPath = "src-tauri/tauri.conf.json"
+          $conf = Get-Content $confPath -Raw | ConvertFrom-Json
+          $conf.bundle.resources += @("bin/_pw7_/**")
+          $conf | ConvertTo-Json -Depth 10 | Set-Content $confPath -Encoding UTF8
+          Write-Host "已添加 bin/_pw7_/** 到 tauri.conf.json resources"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
