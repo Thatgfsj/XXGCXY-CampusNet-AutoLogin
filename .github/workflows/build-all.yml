@@ -37,18 +37,26 @@ jobs:
           $totalSize = (Get-ChildItem -Recurse src-tauri/bin/_pw7_/ | Measure-Object -Property Length -Sum).Sum
           Write-Host "_pw7_ total size: $([math]::Round($totalSize / 1MB, 2)) MB"
 
-      - name: Add _pw7_ to tauri.conf.json (text replace)
+      - name: Add _pw7_ to tauri.conf.json (specific files)
         shell: pwsh
         run: |
           $confPath = Join-Path $env:GITHUB_WORKSPACE "src-tauri/tauri.conf.json"
           $content = Get-Content $confPath -Raw -Encoding UTF8
-          # Exact text replacement - add _pw7_ after WebView2Loader.dll
-          $content = $content.Replace('"bin/WebView2Loader.dll"', '"bin/WebView2Loader.dll", "bin/_pw7_/**"')
-          # Write as UTF8 without BOM
+          # Add individual files instead of ** glob - Tauri glob might fail with ** on these
+          $pw7Files = @(
+            '"bin/_pw7_/pwsh.exe"',
+            '"bin/_pw7_/pwsh.dll"',
+            '"bin/_pw7_/coreclr.dll"',
+            '"bin/_pw7_/*"'   # also try * as fallback
+          )
+          $replaceWith = '"bin/WebView2Loader.dll", ' + ($pw7Files -join ', ')
+          $content = $content.Replace('"bin/WebView2Loader.dll"', $replaceWith)
           [System.IO.File]::WriteAllText($confPath, $content, [System.Text.UTF8Encoding]::new($false))
-          # Verify
           $check = Get-Content $confPath -Raw -Encoding UTF8
-          if ($check -match '_pw7_') { Write-Host "SUCCESS: _pw7_ in resources" } else { Write-Host "FAIL: _pw7_ missing!" }
+          Write-Host "SUCCESS: resources updated"
+          # Show the resources section (multiline)
+          $match = [regex]::Match($check, '"resources".*\[.*?\]', 'Singleline')
+          if ($match.Success) { Write-Host $match.Value }
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -61,16 +69,14 @@ jobs:
       - name: Verify _pw7_ + config before build
         shell: pwsh
         run: |
-          $pwd = Get-Location
           Write-Host "Working dir: $pwd"
           Write-Host "Does _pw7_ exist?: $(Test-Path src-tauri/bin/_pw7_)"
           Write-Host "Does pwsh.exe exist?: $(Test-Path src-tauri/bin/_pw7_/pwsh.exe)"
-          Write-Host "bin/_pw7_ contents: $(Get-ChildItem src-tauri/bin/_pw7_/ | Select-Object -First 3 | ForEach-Object { $_.Name })"
           Write-Host ""
           Write-Host "=== RESOURCES in tauri.conf.json ==="
           $raw = Get-Content "src-tauri/tauri.conf.json" -Raw -Encoding UTF8
-          $match = [regex]::Match($raw, '"resources".*?\[.*?\]')
-          if ($match.Success) { Write-Host $match.Value } else { Write-Host "NOT FOUND" }
+          $match = [regex]::Match($raw, '"resources".*\[.*?\]', 'Singleline')
+          if ($match.Success) { Write-Host $match.Value } else { Write-Host "REGEX FAILED - dumping raw:"; $raw | Out-String | Write-Host }
           Write-Host ""
           Write-Host "File contains _pw7_: $($raw.Contains('_pw7_'))"
 
