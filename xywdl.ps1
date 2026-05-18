@@ -283,15 +283,19 @@ class AuthenticationClient {
     [ConfigManager] $ConfigMgr
     [NetworkInterfaceHelper] $NetworkHelper
     [bool] $IsAutoDetected
+    [bool] $NonInteractive
 
     AuthenticationClient([NetworkConfig]$c, [ConfigManager]$cm, [NetworkInterfaceHelper]$nh) {
         $this.Config = $c
         $this.ConfigMgr = $cm
         $this.NetworkHelper = $nh
         $this.IsAutoDetected = $false
+        $this.NonInteractive = $false
     }
 
-    [void] Run() {
+    [void] Run([bool]$nonInteractive) {
+        $this.NonInteractive = $nonInteractive
+
         Write-Host "`n===== 新乡工程学院校园网登录脚本 =====" -ForegroundColor Cyan
         $savedConfig = $this.ConfigMgr.LoadConfig()
         if ($savedConfig) {
@@ -317,6 +321,10 @@ class AuthenticationClient {
             Write-Host "自动获取成功！" -ForegroundColor Green
             $this.DisplayNetworkInfo()
         } else {
+            if ($this.NonInteractive) {
+                Write-Host "自动获取参数失败，非交互模式下无法手动输入，退出" -ForegroundColor Red
+                exit 1
+            }
             Write-Host "`n请按以下步骤操作：" -ForegroundColor White
             Write-Host "1. 连接校园网（如果已经登录登录2.2.2.2来退出）" -ForegroundColor Gray
             Write-Host "2. 打开浏览器访问任意网站（如 www.qq.com）" -ForegroundColor Gray
@@ -337,9 +345,16 @@ class AuthenticationClient {
                 $this.DisplayNetworkInfo()
             } else {
                 Write-Host "URL解析失败，请检查URL是否完整" -ForegroundColor Red
-                Read-Host "按Enter退出"
+                if (-not $this.NonInteractive) {
+                    Read-Host "按Enter退出"
+                }
                 exit 1
             }
+        }
+
+        if ($this.NonInteractive) {
+            Write-Host "非交互模式，跳过账号输入，无法完成配置" -ForegroundColor Red
+            exit 1
         }
 
         $this.PromptForCredentials()
@@ -364,7 +379,7 @@ class AuthenticationClient {
             Write-Host "方法1: 尝试访问 www.qq.com 捕获重定向..." -ForegroundColor Gray
 
             try {
-                $response = Invoke-WebRequest -Uri "http://www.qq.com" -MaximumRedirection 0 -ErrorAction SilentlyContinue
+                $response = Invoke-WebRequest -Uri "http://www.qq.com" -MaximumRedirection 0 -ErrorAction SilentlyContinue -Proxy $null
             }
             catch {
                 $response = $null
@@ -393,7 +408,7 @@ class AuthenticationClient {
 
             $response = $null
             try {
-                $response = Invoke-WebRequest -Uri "http://172.18.252.12:6060" -MaximumRedirection 0 -TimeoutSec 10 -ErrorAction SilentlyContinue
+                $response = Invoke-WebRequest -Uri "http://172.18.252.12:6060" -MaximumRedirection 0 -TimeoutSec 10 -ErrorAction SilentlyContinue -Proxy $null
             }
             catch {
                 $response = $null
@@ -538,7 +553,7 @@ class AuthenticationClient {
             $requestUrl = $authUrl + "?" + $queryParams
             Write-Host "请求地址: $requestUrl" -ForegroundColor Gray
 
-            $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+            $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop -Proxy $null
 
             Write-Host "`n=== 认证响应 ===" -ForegroundColor Cyan
             Write-Host "HTTP状态码: $($response.StatusCode)" -ForegroundColor Green
@@ -565,7 +580,11 @@ class AuthenticationClient {
             if ($b) { [Runtime.InteropServices.Marshal]::FreeBSTR($b) }
         }
 
-        Read-Host "`n按 Enter 键退出脚本" | Out-Null
+        if ($args -notcontains '--non-interactive') {
+            if (-not $this.NonInteractive) {
+            Read-Host "`n按 Enter 键退出脚本" | Out-Null
+        }
+        }
     }
 }
 
@@ -574,7 +593,7 @@ try {
     $configMgr = [ConfigManager]::new((Join-Path $env:APPDATA "xxgc_campus_net_config.txt"))
     $netHelper = [NetworkInterfaceHelper]::new()
     $authClient = [AuthenticationClient]::new($config, $configMgr, $netHelper)
-    $authClient.Run()
+    $authClient.Run($args -contains '--non-interactive')
 }
 catch {
     Write-Host "`n脚本执行出错：$($_.Exception.Message)" -ForegroundColor Red

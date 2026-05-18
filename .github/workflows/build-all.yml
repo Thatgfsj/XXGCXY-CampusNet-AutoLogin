@@ -8,15 +8,15 @@ permissions:
 
 jobs:
   # ============================================
-  # Windows + 内置 PS7 (win-portable 分支)
+  # Windows + 内置 PS7 (包含 _pw7_ 目录)
   # ============================================
   build-win-portable:
     runs-on: windows-latest
     steps:
-      - name: Checkout win-portable
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: win-portable
+          ref: main
           lfs: true
 
       - name: Setup Node
@@ -46,15 +46,15 @@ jobs:
           path: src-tauri/target/release/bundle/msi/*.msi
 
   # ============================================
-  # Windows + 系统 PS7 (win-system-ps7 分支)
+  # Windows + 系统 PS7 (移除 _pw7_ 目录)
   # ============================================
   build-win-system:
     runs-on: windows-latest
     steps:
-      - name: Checkout win-system-ps7
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: win-system-ps7
+          ref: main
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -66,6 +66,22 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Remove _pw7_ directory (system PS7 mode)
+        shell: pwsh
+        run: |
+          # Tauri resources 中移除 _pw7_ 便携版 PowerShell
+          # 通过删除 _pw7_ 目录来让 xywdl.bat 回退到系统 PS7
+          $pw7Paths = @(
+            ".\_pw7_",
+            ".\src-tauri\bin\_pw7_"
+          )
+          foreach ($p in $pw7Paths) {
+            if (Test-Path $p) {
+              Remove-Item -Recurse -Force $p
+              Write-Host "已删除: $p"
+            }
+          }
 
       - name: Build Tauri
         run: npx @tauri-apps/cli build
@@ -83,33 +99,137 @@ jobs:
           path: src-tauri/target/release/bundle/msi/*.msi
 
   # ============================================
-  # Linux + sh 脚本 (linux-sh 分支)
+  # Linux: deb + tar.gz + rpm
   # ============================================
   build-linux:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout linux-sh
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: linux-sh
+          ref: main
 
-      - name: Package Linux script
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system deps (WebKit + rpm)
         run: |
-          mkdir -p release/linux
-          cp xywdl.sh release/linux/
-          chmod +x release/linux/xywdl.sh
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            alien \
+            rpm \
+            fakeroot
 
-      - name: Upload Linux package
+      - name: Build Tauri
+        run: npx @tauri-apps/cli build
+
+      - name: Create Linux packages
+        run: |
+          APP_VERSION="1.7.11"
+          mkdir -p release/linux
+
+          # 复制 deb 包
+          cp src-tauri/target/release/bundle/deb/*.deb release/linux/
+
+          # 创建 tar.gz 包
+          BINARY_NAME="xxgcxy-wifi"
+          TAR_DIR="xxgcxy-wifi-v${APP_VERSION}-linux-x64"
+          mkdir -p "release/linux/${TAR_DIR}"
+
+          # 复制二进制及资源文件
+          if [ -f "src-tauri/target/release/${BINARY_NAME}" ]; then
+            cp "src-tauri/target/release/${BINARY_NAME}" "release/linux/${TAR_DIR}/"
+          fi
+          # 复制 shell 脚本
+          cp xywdl.sh "release/linux/${TAR_DIR}/"
+          chmod +x "release/linux/${TAR_DIR}/xywdl.sh"
+
+          # 创建 tar.gz
+          cd release/linux
+          tar -czf "xxgcxy-wifi-v${APP_VERSION}-x86_64-linux.tar.gz" "${TAR_DIR}/"
+          rm -rf "${TAR_DIR}"
+          cd ../..
+
+          # 将 deb 转换为 rpm (需要 alien)
+          cd src-tauri/target/release/bundle/deb/
+          DEB_FILE=$(ls *.deb | head -1)
+          if [ -n "$DEB_FILE" ]; then
+            fakeroot alien --to-rpm --keep-version "$DEB_FILE" 2>/dev/null || \
+            alien --to-rpm --keep-version "$DEB_FILE" 2>/dev/null || \
+            echo "rpm 转换失败（跳过）" 
+          fi
+          cd ../../../../..
+
+          # 复制 rpm 包（如果生成成功）
+          if ls src-tauri/target/release/bundle/deb/*.rpm 1>/dev/null 2>&1; then
+            cp src-tauri/target/release/bundle/deb/*.rpm release/linux/
+          fi
+
+      - name: Upload Linux deb
         uses: actions/upload-artifact@v4
         with:
           name: linux-deb
-          path: release/linux/xywdl.sh
+          path: release/linux/*.deb
+
+      - name: Upload Linux tar.gz
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-tar-gz
+          path: release/linux/*.tar.gz
+
+      - name: Upload Linux rpm
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-rpm
+          path: release/linux/*.rpm
+
+  # ============================================
+  # 发布独立 sh 脚本
+  # ============================================
+  build-standalone-sh:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Package standalone sh script
+        run: |
+          mkdir -p release/standalone-sh
+          cp xywdl.sh release/standalone-sh/
+          chmod +x release/standalone-sh/xywdl.sh
+
+      - name: Upload standalone sh
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-sh
+          path: release/standalone-sh/xywdl.sh
 
   # ============================================
   # 创建统一 Release
   # ============================================
   release:
-    needs: [build-win-portable, build-win-system, build-linux]
+    needs: [build-win-portable, build-win-system, build-linux, build-standalone-sh]
     runs-on: ubuntu-latest
     steps:
       - name: Download win-portable NSIS
@@ -136,11 +256,29 @@ jobs:
           name: win-system-msi
           path: artifacts/win-system
 
-      - name: Download Linux
+      - name: Download Linux deb
         uses: actions/download-artifact@v4
         with:
           name: linux-deb
           path: artifacts/linux
+
+      - name: Download Linux tar.gz
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-tar-gz
+          path: artifacts/linux
+
+      - name: Download Linux rpm
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-rpm
+          path: artifacts/linux
+
+      - name: Download standalone sh
+        uses: actions/download-artifact@v4
+        with:
+          name: standalone-sh
+          path: artifacts/standalone-sh
 
       - name: Rename win-system artifacts
         run: |
@@ -156,23 +294,29 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.7.10
-          name: v1.7.10 正式版 - 校园网自动登录助手
+          tag_name: v1.7.11
+          name: v1.7.11 正式版 - 校园网自动登录助手
           body: |
-            v1.7.10 正式版 - 校园网自动登录助手
+            v1.7.11 正式版 - 校园网自动登录助手
 
             ## 下载说明
 
             ### Windows 版本 (内置 PS7 便携版)
-            - xxgcxy-wifi_1.7.10_x64-setup.exe - NSIS 安装包
-            - xxgcxy-wifi_1.7.10_x64_zh-CN.msi - MSI 安装包
+            - xxgcxy-wifi_1.7.11_x64-setup.exe - NSIS 安装包
+            - xxgcxy-wifi_1.7.11_x64_zh-CN.msi - MSI 安装包
 
             ### Windows 版本 (需系统安装 PS7)
-            - xxgcxy-wifi_1.7.10_x64-setup_no-ps7.exe - NSIS 安装包
-            - xxgcxy-wifi_1.7.10_x64_zh-CN_no-ps7.msi - MSI 安装包
+            - xxgcxy-wifi_1.7.11_x64-setup_no-ps7.exe - NSIS 安装包
+            - xxgcxy-wifi_1.7.11_x64_zh-CN_no-ps7.msi - MSI 安装包
 
             ### Linux 版本
-            - xywdl.sh - Shell 脚本 (需安装 pwsh)
+            - xxgcxy-wifi_1.7.11_amd64.deb - Debian/Ubuntu 安装包
+            - xxgcxy-wifi-v1.7.11-x86_64-linux.tar.gz - 通用 Linux 压缩包
+            - xxgcxy-wifi-1.7.11-1.x86_64.rpm - RPM 包 (仅上架，需通过 alien 从 deb 转换，如无法使用请使用 deb 包)
+            - xywdl.sh - 独立 Shell 脚本 (需安装 pwsh)
+
+            ### 独立脚本
+            - xywdl.sh - 跨平台登录脚本
 
             ## 版本说明
 
@@ -182,8 +326,13 @@ jobs:
             | 系统PS7版 | ❌ | ✅ |
             | Linux版 | N/A | ✅ (pwsh) |
 
-            ## v1.7.10 修复
-            - 修复: 绑捆 WebView2Loader.dll，解决启动报"找不到 WebView2Loader.dll"错误
+            ## v1.7.11 更新内容
+            - 修复: 抗代理干扰 — 所有 HTTP 请求增加 `.no_proxy()` 以绕过系统代理
+            - 修复: 自动重连逻辑增强 — 增加 3 次重试检测，重连后重新检查网络状态
+            - 修复: 登录失败自动重试 — 登录失败后等待 5 秒自动重试一次
+            - 新增: 托盘菜单"手动链接"选项
+            - 优化: 登录脚本支持 `--non-interactive` 参数
+            - 新增: Linux TAR.GZ 和 RPM 包
 
             ## Linux 安装 pwsh
 
@@ -201,4 +350,7 @@ jobs:
             artifacts/win-portable/*.msi
             artifacts/win-system/*.exe
             artifacts/win-system/*.msi
-            artifacts/linux/*.sh
+            artifacts/linux/*.deb
+            artifacts/linux/*.tar.gz
+            artifacts/linux/*.rpm
+            artifacts/standalone-sh/*.sh

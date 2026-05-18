@@ -56,17 +56,17 @@ if not defined PW7_PATH (
 REM 执行 PowerShell 脚本
 if defined PW7_PATH (
     if "%PW7_PATH%"=="pwsh" (
-        echo [执行] pwsh -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
-        pwsh -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+        echo [执行] pwsh -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
+        pwsh -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
     ) else (
-        echo [执行] "%PW7_PATH%" -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
-        "%PW7_PATH%" -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+        echo [执行] "%PW7_PATH%" -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
+        "%PW7_PATH%" -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
     )
 ) else (
     REM 回退到 Windows PowerShell 5.x
     echo [信息] 未找到 PowerShell 7，使用系统 PowerShell
-    echo [执行] powershell -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
-    powershell -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+    echo [执行] powershell -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
+    powershell -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
 )
 
 set "EXIT_CODE=%errorlevel%"

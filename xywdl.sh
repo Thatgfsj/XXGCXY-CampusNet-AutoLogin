@@ -77,7 +77,7 @@ get_mac_address() {
 auto_detect_params() {
     log_info "正在尝试自动获取登录参数..."
 
-    local response=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 http://www.qq.com 2>/dev/null)
+    local response=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 --noproxy '*' http://www.qq.com 2>/dev/null)
 
     if [[ -n "$response" && "$response" != "http://www.qq.com"* ]]; then
         log_info "捕获到重定向: $response"
@@ -88,7 +88,7 @@ auto_detect_params() {
     local local_ip=$(get_local_ip)
     local local_mac=$(get_mac_address)
 
-    response=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 --max-time 5 "http://172.18.252.12:6060" 2>/dev/null)
+    response=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 --max-time 5 --noproxy '*' "http://172.18.252.12:6060" 2>/dev/null)
     if [[ -n "$response" ]]; then
         log_info "捕获到重定向: $response"
         parse_redirect_url "$response"
@@ -222,7 +222,7 @@ do_authenticate() {
     local full_url="${auth_url}?${query}"
     log_info "请求地址: $full_url"
 
-    local response=$(curl -s -w "\n%{http_code}" "$full_url" 2>&1)
+    local response=$(curl -s -w "\n%{http_code}" --noproxy '*' "$full_url" 2>&1)
     local http_code=$(echo "$response" | tail -1)
     local body=$(echo "$response" | head -n -1)
 
@@ -248,6 +248,15 @@ do_authenticate() {
 
 # 主流程
 main() {
+    # 检查非交互模式
+    NON_INTERACTIVE=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--non-interactive" ]]; then
+            NON_INTERACTIVE=true
+            break
+        fi
+    done
+
     if load_config; then
         log_info "已找到保存的配置，自动登录中..."
         display_info
@@ -260,6 +269,10 @@ main() {
     if auto_detect_params; then
         display_info
     else
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            log_error "自动获取参数失败，非交互模式下无法手动输入，退出"
+            exit 1
+        fi
         log_warn "自动获取参数失败，请手动输入"
         manual_input
         display_info
@@ -272,6 +285,10 @@ main() {
     fi
 
     if [[ -z "$PASSWORD" ]]; then
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            log_error "非交互模式，缺少密码，退出"
+            exit 1
+        fi
         input_credentials
         save_config
     fi
@@ -280,7 +297,9 @@ main() {
     log_info "=== 步骤3：开始认证 ==="
     do_authenticate
 
-    read -p "按 Enter 键退出脚本" dummy
+    if [[ "$NON_INTERACTIVE" == "false" ]]; then
+        read -p "按 Enter 键退出脚本" dummy
+    fi
 }
 
-main
+main "$@"

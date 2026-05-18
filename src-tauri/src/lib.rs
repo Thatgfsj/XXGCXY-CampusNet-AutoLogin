@@ -565,6 +565,20 @@ async fn check_internet() -> bool {
     false
 }
 
+// ============= 带重试的互联网检测 =============
+
+async fn check_internet_with_retry() -> bool {
+    for i in 0..3 {
+        if check_internet().await {
+            return true;
+        }
+        if i < 2 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+    false
+}
+
 enum CheckResult {
     Connected,
     NeedLogin,
@@ -575,6 +589,7 @@ async fn check_url(url: &str) -> CheckResult {
     let url = url.to_string();
     let result = tokio::task::spawn_blocking(move || {
         let client = match reqwest::blocking::Client::builder()
+            .no_proxy()
             .timeout(std::time::Duration::from_secs(3))
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -654,7 +669,7 @@ async fn check_url(url: &str) -> CheckResult {
 async fn check_network(state: tauri::State<'_, AppState>) -> Result<NetworkStatus, String> {
     let config = state.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let wifi_connected = get_connected_wifi();
-    let internet_ok = check_internet().await;
+    let internet_ok = check_internet_with_retry().await;
     let needs_reconnect = wifi_connected.is_none()
         || (!config.primary_ssid.is_empty()
             && wifi_connected.as_ref() != Some(&config.primary_ssid)
@@ -725,7 +740,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
         let shell = app.shell();
         let output = shell
             .command("cmd")
-            .args(["/c", &script_path.to_string_lossy()])
+            .args(["/c", &format!("\"{}\" --non-interactive", script_path.to_string_lossy())])
             .output()
             .await
             .map_err(|e| format!("执行登录脚本失败: {}", e))?;
@@ -772,10 +787,11 @@ async fn open_github(app: AppHandle) -> Result<(), String> {
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
+    let manual_item = MenuItem::with_id(app, "manual_connect", "手动链接", true, None::<&str>)?;
     let check_item = MenuItem::with_id(app, "check", "立即检测", true, None::<&str>)?;
     let login_item = MenuItem::with_id(app, "login", "执行登录脚本", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &check_item, &login_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&show_item, &manual_item, &check_item, &login_item, &quit_item])?;
     let icon = app.default_window_icon().cloned();
     let mut tray_builder = TrayIconBuilder::new()
         .menu(&menu)
@@ -785,6 +801,11 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
+                }
+            }
+            "manual_connect" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("run_login", ());
                 }
             }
             "check" => {

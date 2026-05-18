@@ -541,6 +541,27 @@
                 if (status.needs_reconnect) {
                     addLog('检测到断网，开始重连...');
                     await reconnectWifi();
+                    // 重连后重新检测网络状态
+                    await sleep(3000);
+                    const retryStatus = await invoke('check_network');
+                    updateStatus(retryStatus);
+                    if (retryStatus.internet_ok) {
+                        addLog('重连后网络已恢复正常');
+                        return;
+                    }
+                    if (retryStatus.needs_login) {
+                        addLog('重连后需要登录校园网...');
+                        const now = Date.now();
+                        if (now - lastLoginTime >= 5000) {
+                            await runLoginScript();
+                        }
+                    } else if (retryStatus.wifi_connected) {
+                        // WiFi已连接但无法获取IP或网络尚未就绪
+                        addLog('WiFi已连接，等待网络就绪...');
+                        await sleep(5000);
+                        const finalStatus = await invoke('check_network');
+                        updateStatus(finalStatus);
+                    }
                     return;
                 }
                 
@@ -696,6 +717,28 @@
             } catch (e) {
                 addLog('登录失败: ' + e);
                 isLoggingIn = false;  // 失败时立即重置，允许重试
+                // 登录失败后等待5秒重试一次
+                addLog('将在5秒后重试登录...');
+                setTimeout(async () => {
+                    isLoggingIn = false;
+                    if (autoCheckEnabled) {
+                        addLog('正在重试登录...');
+                        try {
+                            const result = await invoke('run_login_script');
+                            addLog(result);
+                            await sleep(3000);
+                            const status = await invoke('check_network');
+                            updateStatus(status);
+                            if (status.internet_ok) {
+                                addLog('重试登录成功，网络已恢复正常');
+                            } else {
+                                addLog('重试登录后仍无法上网，请手动检查');
+                            }
+                        } catch (e2) {
+                            addLog('重试登录失败: ' + e2);
+                        }
+                    }
+                }, 5000);
             } finally {
                 // 只有登录成功时才延迟重置，防止短时间内重复登录
                 if (isLoggingIn) {
