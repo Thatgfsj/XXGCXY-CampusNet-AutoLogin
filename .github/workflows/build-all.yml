@@ -18,6 +18,14 @@ jobs:
         with:
           ref: main
           lfs: true
+          fetch-depth: 0
+
+      - name: Fetch _pw7_ from win-portable branch
+        shell: pwsh
+        run: |
+          git fetch origin win-portable --depth=1
+          git checkout origin/win-portable -- src-tauri/bin/_pw7_/
+          Write-Host "_pw7_ 目录已从 win-portable 分支获取，文件数：$( (Get-ChildItem -Recurse src-tauri/bin/_pw7_).Count )"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -301,22 +309,21 @@ jobs:
 
             ## 下载说明
 
-            ### Windows 版本 (内置 PS7 便携版)
-            - xxgcxy-wifi_1.7.11_x64-setup.exe - NSIS 安装包
-            - xxgcxy-wifi_1.7.11_x64_zh-CN.msi - MSI 安装包
+            Windows 版本 (内置 PS7 便携版，无需手动安装 PowerShell 7)
+            - `xxgcxy-wifi_1.7.11_x64-setup.exe` — NSIS 安装包
+            - `xxgcxy-wifi_1.7.11_x64_zh-CN.msi` — MSI 安装包
 
-            ### Windows 版本 (需系统安装 PS7)
-            - xxgcxy-wifi_1.7.11_x64-setup_no-ps7.exe - NSIS 安装包
-            - xxgcxy-wifi_1.7.11_x64_zh-CN_no-ps7.msi - MSI 安装包
+            Windows 版本 (需系统安装 PS7)
+            - `xxgcxy-wifi_1.7.11_x64-setup_no-ps7.exe` — NSIS 安装包
+            - `xxgcxy-wifi_1.7.11_x64_zh-CN_no-ps7.msi` — MSI 安装包
 
-            ### Linux 版本
-            - xxgcxy-wifi_1.7.11_amd64.deb - Debian/Ubuntu 安装包
-            - xxgcxy-wifi-v1.7.11-x86_64-linux.tar.gz - 通用 Linux 压缩包
-            - xxgcxy-wifi-1.7.11-1.x86_64.rpm - RPM 包 (仅上架，需通过 alien 从 deb 转换，如无法使用请使用 deb 包)
-            - xywdl.sh - 独立 Shell 脚本 (需安装 pwsh)
+            Linux 版本
+            - `xxgcxy-wifi_1.7.11_amd64.deb` — Debian/Ubuntu 安装包
+            - `xxgcxy-wifi-v1.7.11-x86_64-linux.tar.gz` — 通用 Linux 压缩包（二进制 + 脚本）
+            - `xxgcxy-wifi-1.7.11-1.x86_64.rpm` — RPM 包（由 deb 转换，如无法使用请用 deb 包）
 
-            ### 独立脚本
-            - xywdl.sh - 跨平台登录脚本
+            跨平台脚本
+            - `xywdl.sh` — 独立 Shell 脚本（Linux/macOS，需安装 pwsh）
 
             ## 版本说明
 
@@ -327,11 +334,11 @@ jobs:
             | Linux版 | N/A | ✅ (pwsh) |
 
             ## v1.7.11 更新内容
-            - 修复: 抗代理干扰 — 所有 HTTP 请求增加 `.no_proxy()` 以绕过系统代理
-            - 修复: 自动重连逻辑增强 — 增加 3 次重试检测，重连后重新检查网络状态
-            - 修复: 登录失败自动重试 — 登录失败后等待 5 秒自动重试一次
+            - 修复: 抗代理干扰 — 所有 HTTP 请求绕过系统代理
+            - 修复: 自动重连逻辑增强 — 3 次重试检测 + 重连后重新验证
+            - 修复: 登录失败自动重试
             - 新增: 托盘菜单"手动链接"选项
-            - 优化: 登录脚本支持 `--non-interactive` 参数
+            - 优化: 登录脚本支持 `--non-interactive` 参数（被App调用时静默运行）
             - 新增: Linux TAR.GZ 和 RPM 包
 
             ## Linux 安装 pwsh
