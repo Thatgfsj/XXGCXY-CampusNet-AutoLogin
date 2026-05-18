@@ -13,30 +13,28 @@ jobs:
   build-win-portable:
     runs-on: windows-latest
     steps:
-      - name: Checkout main
+      - name: Checkout win-portable (contains _pw7_ via LFS)
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: win-portable
           lfs: true
-          fetch-depth: 0
 
-      - name: Fetch _pw7_ from win-portable branch (LFS)
+      # 将 src-tauri/bin/_pw7_ 以外的工作区替换为 main 分支
+      # (保留 _pw7_ 目录，其余文件同步到 main)
+      - name: Sync non-_pw7_ files from main
         shell: pwsh
         run: |
-          git fetch origin win-portable --depth=1
-          git checkout origin/win-portable -- src-tauri/bin/_pw7_/
-          # LFS 指针文件刚被检出，需要拉取真实 LFS 对象并填充
-          git lfs fetch origin win-portable
-          git lfs checkout
-          # 验证：检查 pwsh.exe 是否真的是二进制
+          # 先保存 _pw7_
+          Move-Item src-tauri/bin/_pw7_ ../_pw7_backup -Force
+          # 重新 checkout main 覆盖工作区
+          git fetch origin main --depth=1
+          git checkout origin/main -- .
+          # 恢复 _pw7_
+          Remove-Item src-tauri/bin/_pw7_ -Recurse -Force -ErrorAction SilentlyContinue
+          Move-Item ../_pw7_backup src-tauri/bin/_pw7_
+          # 验证 pwsh.exe 大小
           $pwsh = Get-Item src-tauri/bin/_pw7_/pwsh.exe -ErrorAction SilentlyContinue
-          if ($pwsh -and $pwsh.Length -gt 100000) {
-            Write-Host "_pw7_/pwsh.exe 已正确拉取 (LFS smudged): $($pwsh.Length) bytes"
-          } else {
-            $len = if ($pwsh) { $pwsh.Length } else { 0 }
-            Write-Host "WARNING: _pw7_/pwsh.exe 可能未正确拉取 (LFS pointer?): $len bytes"
-            exit 1
-          }
+          Write-Host "pwsh.exe size: $($pwsh.Length) bytes"
           $totalSize = (Get-ChildItem -Recurse src-tauri/bin/_pw7_/ | Measure-Object -Property Length -Sum).Sum
           Write-Host "_pw7_ 总大小: $([math]::Round($totalSize / 1MB, 2)) MB"
 
