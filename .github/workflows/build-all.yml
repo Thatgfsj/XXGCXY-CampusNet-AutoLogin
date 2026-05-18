@@ -13,39 +13,39 @@ jobs:
   build-win-portable:
     runs-on: windows-latest
     steps:
-      - name: Checkout win-portable (contains _pw7_ via LFS)
+      - name: Checkout win-portable branch (LFS smudges _pw7_ binaries)
         uses: actions/checkout@v4
         with:
           ref: win-portable
           lfs: true
 
-      # 将 src-tauri/bin/_pw7_ 以外的工作区替换为 main 分支
-      # (保留 _pw7_ 目录，其余文件同步到 main)
-      - name: Sync non-_pw7_ files from main
+      - name: Sync non-_pw7_ files from main, restore _pw7_ from LFS checkout
         shell: pwsh
         run: |
-          # 先保存 _pw7_
+          # Save _pw7_ (binaries from LFS-smudged win-portable checkout)
           Move-Item src-tauri/bin/_pw7_ ../_pw7_backup -Force
-          # 重新 checkout main 覆盖工作区
+          # Fetch main and overwrite working tree with main's files
           git fetch origin main --depth=1
           git checkout origin/main -- .
-          # 恢复 _pw7_
+          # Remove any _pw7_ that came from main (doesn't have it)
           Remove-Item src-tauri/bin/_pw7_ -Recurse -Force -ErrorAction SilentlyContinue
+          # Restore real _pw7_ binaries from LFS checkout
           Move-Item ../_pw7_backup src-tauri/bin/_pw7_
-          # 验证 pwsh.exe 大小
+          # Verify real binaries
           $pwsh = Get-Item src-tauri/bin/_pw7_/pwsh.exe -ErrorAction SilentlyContinue
           Write-Host "pwsh.exe size: $($pwsh.Length) bytes"
           $totalSize = (Get-ChildItem -Recurse src-tauri/bin/_pw7_/ | Measure-Object -Property Length -Sum).Sum
-          Write-Host "_pw7_ 总大小: $([math]::Round($totalSize / 1MB, 2)) MB"
+          Write-Host "_pw7_ total size: $([math]::Round($totalSize / 1MB, 2)) MB"
 
-      - name: Add _pw7_ to tauri.conf.json resources
+      - name: Add _pw7_ resources to tauri.conf.json
         shell: pwsh
         run: |
           $confPath = "src-tauri/tauri.conf.json"
-          $conf = Get-Content $confPath -Raw | ConvertFrom-Json
+          $conf = Get-Content $confPath -Raw -Encoding UTF8 | ConvertFrom-Json
           $conf.bundle.resources += @("bin/_pw7_/**")
-          $conf | ConvertTo-Json -Depth 10 | Set-Content $confPath -Encoding UTF8
-          Write-Host "已添加 bin/_pw7_/** 到 tauri.conf.json resources"
+          $json = $conf | ConvertTo-Json -Depth 10
+          [System.IO.File]::WriteAllText((Resolve-Path $confPath), $json, [System.Text.UTF8Encoding]::new($false))
+          Write-Host "Added bin/_pw7_/** to resources"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -98,8 +98,6 @@ jobs:
       - name: Remove _pw7_ directory (system PS7 mode)
         shell: pwsh
         run: |
-          # Tauri resources 中移除 _pw7_ 便携版 PowerShell
-          # 通过删除 _pw7_ 目录来让 xywdl.bat 回退到系统 PS7
           $pw7Paths = @(
             ".\_pw7_",
             ".\src-tauri\bin\_pw7_"
@@ -107,7 +105,7 @@ jobs:
           foreach ($p in $pw7Paths) {
             if (Test-Path $p) {
               Remove-Item -Recurse -Force $p
-              Write-Host "已删除: $p"
+              Write-Host "Removed: $p"
             }
           }
 
@@ -175,39 +173,39 @@ jobs:
           APP_VERSION="1.7.11"
           mkdir -p release/linux
 
-          # 复制 deb 包
+          # Copy deb package
           cp src-tauri/target/release/bundle/deb/*.deb release/linux/
 
-          # 创建 tar.gz 包
+          # Create tar.gz package
           BINARY_NAME="xxgcxy-wifi"
           TAR_DIR="xxgcxy-wifi-v${APP_VERSION}-linux-x64"
           mkdir -p "release/linux/${TAR_DIR}"
 
-          # 复制二进制及资源文件
+          # Copy binary and scripts
           if [ -f "src-tauri/target/release/${BINARY_NAME}" ]; then
             cp "src-tauri/target/release/${BINARY_NAME}" "release/linux/${TAR_DIR}/"
           fi
-          # 复制 shell 脚本
+          # Copy shell script
           cp xywdl.sh "release/linux/${TAR_DIR}/"
           chmod +x "release/linux/${TAR_DIR}/xywdl.sh"
 
-          # 创建 tar.gz
+          # Create tar.gz
           cd release/linux
           tar -czf "xxgcxy-wifi-v${APP_VERSION}-x86_64-linux.tar.gz" "${TAR_DIR}/"
           rm -rf "${TAR_DIR}"
           cd ../..
 
-          # 将 deb 转换为 rpm (需要 alien)
+          # Convert deb to rpm (needs alien)
           cd src-tauri/target/release/bundle/deb/
           DEB_FILE=$(ls *.deb | head -1)
           if [ -n "$DEB_FILE" ]; then
             fakeroot alien --to-rpm --keep-version "$DEB_FILE" 2>/dev/null || \
             alien --to-rpm --keep-version "$DEB_FILE" 2>/dev/null || \
-            echo "rpm 转换失败（跳过）" 
+            echo "rpm conversion failed (skipping)"
           fi
           cd ../../../../..
 
-          # 复制 rpm 包（如果生成成功）
+          # Copy rpm package (if generated successfully)
           if ls src-tauri/target/release/bundle/deb/*.rpm 1>/dev/null 2>&1; then
             cp src-tauri/target/release/bundle/deb/*.rpm release/linux/
           fi
@@ -323,55 +321,35 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.7.11
-          name: v1.7.11 正式版 - 校园网自动登录助手
+          name: v1.7.11 - xiaoyuanwangluo zidong denglu zhushou
           body: |
-            v1.7.11 正式版 - 校园网自动登录助手
+            v1.7.11 - xiaoyuanwangluo zidong denglu zhushou
 
-            ## 下载说明
+            ## Download
 
-            Windows 版本 (内置 PS7 便携版，无需手动安装 PowerShell 7)
-            - `xxgcxy-wifi_1.7.11_x64-setup.exe` — NSIS 安装包
-            - `xxgcxy-wifi_1.7.11_x64_zh-CN.msi` — MSI 安装包
+            **Windows (Built-in PS7, no manual PS7 install needed)**
+            - `xxgcxy-wifi_1.7.11_x64-setup.exe` - NSIS installer
+            - `xxgcxy-wifi_1.7.11_x64_zh-CN.msi` - MSI installer
 
-            Windows 版本 (需系统安装 PS7)
-            - `xxgcxy-wifi_1.7.11_x64-setup_no-ps7.exe` — NSIS 安装包
-            - `xxgcxy-wifi_1.7.11_x64_zh-CN_no-ps7.msi` — MSI 安装包
+            **Windows (System PS7 required)**
+            - `xxgcxy-wifi_1.7.11_x64-setup_no-ps7.exe` - NSIS installer
+            - `xxgcxy-wifi_1.7.11_x64_zh-CN_no-ps7.msi` - MSI installer
 
-            Linux 版本
-            - `xxgcxy-wifi_1.7.11_amd64.deb` — Debian/Ubuntu 安装包
-            - `xxgcxy-wifi-v1.7.11-x86_64-linux.tar.gz` — 通用 Linux 压缩包（二进制 + 脚本）
-            - `xxgcxy-wifi-1.7.11-1.x86_64.rpm` — RPM 包（由 deb 转换，如无法使用请用 deb 包）
+            **Linux**
+            - `xxgcxy-wifi_1.7.11_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v1.7.11-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-1.7.11-1.x86_64.rpm` - RPM package (converted from deb)
 
-            跨平台脚本
-            - `xywdl.sh` — 独立 Shell 脚本（Linux/macOS，需安装 pwsh）
+            **Cross-platform**
+            - `xywdl.sh` - Standalone shell script (Linux/macOS, needs pwsh)
 
-            ## 版本说明
-
-            | 版本 | 内置PS7 | 需要系统PS7 |
-            |------|---------|-------------|
-            | 内置PS7版 | ✅ | ❌ |
-            | 系统PS7版 | ❌ | ✅ |
-            | Linux版 | N/A | ✅ (pwsh) |
-
-            ## v1.7.11 更新内容
-            - 修复: 抗代理干扰 — 所有 HTTP 请求绕过系统代理
-            - 修复: 自动重连逻辑增强 — 3 次重试检测 + 重连后重新验证
-            - 修复: 登录失败自动重试
-            - 新增: 托盘菜单"手动链接"选项
-            - 优化: 登录脚本支持 `--non-interactive` 参数（被App调用时静默运行）
-            - 新增: Linux TAR.GZ 和 RPM 包
-
-            ## Linux 安装 pwsh
-
-            ```bash
-            # Ubuntu/Debian
-            wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
-            sudo dpkg -i packages-microsoft-prod.deb
-            sudo apt update && sudo apt install powershell
-            ```
-
-            ---
-            MIT License | 作者: Thatgfsj
+            ## Changelog v1.7.11
+            - Fix: Anti-proxy interference - all HTTP requests bypass system proxy
+            - Fix: Auto-reconnect logic - 3 retries + revalidate after reconnect
+            - Fix: Auto-retry login on failure
+            - New: Tray menu "Manual Link" option
+            - Optimize: Login script supports --non-interactive flag
+            - New: Linux TAR.GZ and RPM packages
           files: |
             artifacts/win-portable/*.exe
             artifacts/win-portable/*.msi
