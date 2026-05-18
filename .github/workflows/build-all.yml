@@ -55,6 +55,17 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      - name: Verify _pw7_ directory before build
+        shell: pwsh
+        run: |
+          $pwd = Get-Location
+          Write-Host "Working dir: $pwd"
+          Write-Host "Does _pw7_ exist?: $(Test-Path src-tauri/bin/_pw7_)"
+          Write-Host "Does pwsh.exe exist?: $(Test-Path src-tauri/bin/_pw7_/pwsh.exe)"
+          Get-ChildItem src-tauri/bin/_pw7_/ -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { Write-Host "  $_" }
+          Get-ChildItem src-tauri/bin/ -ErrorAction SilentlyContinue | Select-Object Name | ForEach-Object { Write-Host "bin/: $($_.Name)" }
+          Write-Host "All src-tauri/bin/: $(Get-ChildItem src-tauri/bin/ -Recurse | Select-Object Length,Name | ConvertTo-Json -Compress)"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
