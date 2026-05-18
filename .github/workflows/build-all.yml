@@ -37,15 +37,18 @@ jobs:
           $totalSize = (Get-ChildItem -Recurse src-tauri/bin/_pw7_/ | Measure-Object -Property Length -Sum).Sum
           Write-Host "_pw7_ total size: $([math]::Round($totalSize / 1MB, 2)) MB"
 
-      - name: Add _pw7_ resources to tauri.conf.json
+      - name: Add _pw7_ to tauri.conf.json (text replace)
         shell: pwsh
         run: |
-          $confPath = "src-tauri/tauri.conf.json"
-          $conf = Get-Content $confPath -Raw -Encoding UTF8 | ConvertFrom-Json
-          $conf.bundle.resources += @("bin/_pw7_/**")
-          $json = $conf | ConvertTo-Json -Depth 10
-          [System.IO.File]::WriteAllText((Resolve-Path $confPath), $json, [System.Text.UTF8Encoding]::new($false))
-          Write-Host "Added bin/_pw7_/** to resources"
+          $confPath = Join-Path $env:GITHUB_WORKSPACE "src-tauri/tauri.conf.json"
+          $content = Get-Content $confPath -Raw -Encoding UTF8
+          # Exact text replacement - add _pw7_ after WebView2Loader.dll
+          $content = $content.Replace('"bin/WebView2Loader.dll"', '"bin/WebView2Loader.dll", "bin/_pw7_/**"')
+          # Write as UTF8 without BOM
+          [System.IO.File]::WriteAllText($confPath, $content, [System.Text.UTF8Encoding]::new($false))
+          # Verify
+          $check = Get-Content $confPath -Raw -Encoding UTF8
+          if ($check -match '_pw7_') { Write-Host "SUCCESS: _pw7_ in resources" } else { Write-Host "FAIL: _pw7_ missing!" }
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -55,16 +58,21 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Verify _pw7_ directory before build
+      - name: Verify _pw7_ + config before build
         shell: pwsh
         run: |
           $pwd = Get-Location
           Write-Host "Working dir: $pwd"
           Write-Host "Does _pw7_ exist?: $(Test-Path src-tauri/bin/_pw7_)"
           Write-Host "Does pwsh.exe exist?: $(Test-Path src-tauri/bin/_pw7_/pwsh.exe)"
-          Get-ChildItem src-tauri/bin/_pw7_/ -ErrorAction SilentlyContinue | Select-Object -First 5 | ForEach-Object { Write-Host "  $_" }
-          Get-ChildItem src-tauri/bin/ -ErrorAction SilentlyContinue | Select-Object Name | ForEach-Object { Write-Host "bin/: $($_.Name)" }
-          Write-Host "All src-tauri/bin/: $(Get-ChildItem src-tauri/bin/ -Recurse | Select-Object Length,Name | ConvertTo-Json -Compress)"
+          Write-Host "bin/_pw7_ contents: $(Get-ChildItem src-tauri/bin/_pw7_/ | Select-Object -First 3 | ForEach-Object { $_.Name })"
+          Write-Host ""
+          Write-Host "=== RESOURCES in tauri.conf.json ==="
+          $raw = Get-Content "src-tauri/tauri.conf.json" -Raw -Encoding UTF8
+          $match = [regex]::Match($raw, '"resources".*?\[.*?\]')
+          if ($match.Success) { Write-Host $match.Value } else { Write-Host "NOT FOUND" }
+          Write-Host ""
+          Write-Host "File contains _pw7_: $($raw.Contains('_pw7_'))"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
