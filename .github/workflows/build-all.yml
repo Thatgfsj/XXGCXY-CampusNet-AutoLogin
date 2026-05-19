@@ -195,7 +195,7 @@ jobs:
 
       - name: Create Linux packages
         run: |
-          APP_VERSION="1.7.11"
+          APP_VERSION="1.8.1"
           mkdir -p release/linux
 
           # Copy deb package
@@ -345,36 +345,36 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.7.11
-          name: v1.7.11 - xiaoyuanwangluo zidong denglu zhushou
+          tag_name: v1.8.1
+          name: v1.8.1 - xiaoyuanwangluo zidong denglu zhushou
           body: |
-            v1.7.11 - xiaoyuanwangluo zidong denglu zhushou
+            v1.8.1 - xiaoyuanwangluo zidong denglu zhushou
 
             ## Download
 
             **Windows (Built-in PS7, no manual PS7 install needed)**
-            - `xxgcxy-wifi_1.7.11_x64-setup.exe` - NSIS installer
-            - `xxgcxy-wifi_1.7.11_x64_zh-CN.msi` - MSI installer
+            - `xxgcxy-wifi_1.8.1_x64-setup.exe` - NSIS installer
+            - `xxgcxy-wifi_1.8.1_x64_zh-CN.msi` - MSI installer
 
             **Windows (System PS7 required)**
-            - `xxgcxy-wifi_1.7.11_x64-setup_no-ps7.exe` - NSIS installer
-            - `xxgcxy-wifi_1.7.11_x64_zh-CN_no-ps7.msi` - MSI installer
+            - `xxgcxy-wifi_1.8.1_x64-setup_no-ps7.exe` - NSIS installer
+            - `xxgcxy-wifi_1.8.1_x64_zh-CN_no-ps7.msi` - MSI installer
 
             **Linux**
-            - `xxgcxy-wifi_1.7.11_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v1.7.11-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-1.7.11-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_1.8.1_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v1.8.1-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-1.8.1-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs pwsh)
 
-            ## Changelog v1.7.11
-            - Fix: Anti-proxy interference - all HTTP requests bypass system proxy
-            - Fix: Auto-reconnect logic - 3 retries + revalidate after reconnect
-            - Fix: Auto-retry login on failure
-            - New: Tray menu "Manual Link" option
-            - Optimize: Login script supports --non-interactive flag
-            - New: Linux TAR.GZ and RPM packages
+            ## Changelog v1.8.1
+            - Fix: bat quoting crash when running login script from tray
+            - Fix: tray menu reorder - 立即检测 second, 手动连接 third
+            - Fix: 手动连接 now does WiFi connect with signal comparison (no auto-login)
+            - Fix: 执行登录脚本 now runs directly, bypasses all safety checks
+            - Fix: Linux run_login_script missing --non-interactive flag
+            - Chore: add comprehensive TECHNICAL_DOC.md
           files: |
             artifacts/win-portable/*.exe
             artifacts/win-portable/*.msi
