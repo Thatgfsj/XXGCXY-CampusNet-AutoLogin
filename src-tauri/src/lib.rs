@@ -739,8 +739,8 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     {
         let shell = app.shell();
         let output = shell
-            .command("cmd")
-            .args(["/c", &format!("\"{}\" --non-interactive", script_path.to_string_lossy())])
+            .command(script_path.to_string_lossy().as_ref())
+            .arg("--non-interactive")
             .output()
             .await
             .map_err(|e| format!("执行登录脚本失败: {}", e))?;
@@ -758,7 +758,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
         let script_str = script_path.to_string_lossy().to_string();
         let output = shell
             .command("bash")
-            .args(["-c", &format!("chmod +x '{}' && '{}'", script_str, script_str)])
+            .args(["-c", &format!("chmod +x '{}' && '{}' --non-interactive", script_str, script_str)])
             .output()
             .await
             .map_err(|e| format!("执行登录脚本失败: {}", e))?;
@@ -787,11 +787,11 @@ async fn open_github(app: AppHandle) -> Result<(), String> {
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show_item = MenuItem::with_id(app, "show", "显示窗口", true, None::<&str>)?;
-    let manual_item = MenuItem::with_id(app, "manual_connect", "手动链接", true, None::<&str>)?;
+    let manual_item = MenuItem::with_id(app, "manual_connect", "手动连接", true, None::<&str>)?;
     let check_item = MenuItem::with_id(app, "check", "立即检测", true, None::<&str>)?;
     let login_item = MenuItem::with_id(app, "login", "执行登录脚本", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &manual_item, &check_item, &login_item, &quit_item])?;
+    let menu = Menu::with_items(app, &[&show_item, &check_item, &manual_item, &login_item, &quit_item])?;
     let icon = app.default_window_icon().cloned();
     let mut tray_builder = TrayIconBuilder::new()
         .menu(&menu)
@@ -805,7 +805,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             }
             "manual_connect" => {
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.emit("run_login", ());
+                    let _ = window.emit("manual_connect_wifi", ());
                 }
             }
             "check" => {
