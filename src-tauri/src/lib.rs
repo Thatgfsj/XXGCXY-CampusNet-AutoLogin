@@ -40,7 +40,7 @@ fn check_single_instance() -> bool {
     let _ = fs::create_dir_all(&lock_dir);
     let lock_path = lock_dir.join("single_instance.lock");
 
-    use std::io::{Read, Write};
+    use std::io::Write;
     match fs::OpenOptions::new().create_new(true).write(true).open(&lock_path) {
         Ok(mut file) => {
             let pid = std::process::id().to_string();
@@ -62,6 +62,7 @@ fn hidden_command(program: &str) -> std::process::Command {
     cmd
 }
 
+#[allow(dead_code)]
 #[cfg(not(windows))]
 fn hidden_command(program: &str) -> std::process::Command {
     std::process::Command::new(program)
@@ -773,6 +774,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
 }
 
 // ============= 打开 GitHub =============
+#[allow(deprecated)]
 
 #[tauri::command]
 async fn open_github(app: AppHandle) -> Result<(), String> {
