@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 1.7.11 |
+| **当前版本** | 1.8.1 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -71,7 +71,7 @@ XXGCXY-CampusNet-AutoLogin/
 │       └── build-linux.yml        # Linux .deb 构建工作流（仅 tag 触发）
 │
 ├── index.html                     # 前端单页应用（~910行），含完整 CSS + JS
-├── package.json                   # Node.js 项目配置 (campus-wifi, 1.7.11)
+├── package.json                   # Node.js 项目配置 (campus-wifi, 1.8.1)
 ├── package-lock.json              # 依赖锁定文件
 │
 ├── xywdl.ps1                      # ★ 核心认证脚本（~604行，PowerShell 类实现）
@@ -87,7 +87,7 @@ XXGCXY-CampusNet-AutoLogin/
 ├── linux_logs.zip                 # Linux 日志归档
 │
 └── src-tauri/                     # Tauri 后端（Rust）
-    ├── Cargo.toml                 # Rust 包配置 (app, 1.7.11)
+    ├── Cargo.toml                 # Rust 包配置 (app, 1.8.1)
     ├── Cargo.lock                 # 依赖锁定
     ├── build.rs                   # 构建脚本（复制 WebView2Loader.dll）
     ├── tauri.conf.json            # Tauri 配置（窗口、打包、NSIS、插件权限）
@@ -301,12 +301,13 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 #### 5.1.8 系统托盘 (`setup_tray`)
 
 菜单项：
+菜单项：
 | ID | 显示文本 | 功能 |
 |----|----------|------|
 | `show` | 显示窗口 | 显示并聚焦主窗口 |
-| `manual_connect` | 手动链接 | 触发 `run_login` 事件 |
-| `check` | 立即检测 | 触发 `check_network` 事件 |
-| `login` | 执行登录脚本 | 触发 `run_login` 事件 |
+| `check` | 立即检测 | 触发 `check_network` 事件（全自动检测→重连→登录） |
+| `manual_connect` | 手动连接 | 触发 `manual_connect_wifi` 事件（连接 WiFi，不自动登录） |
+| `login` | 执行登录脚本 | 触发 `run_login` 事件（绕过检查，直接执行） |
 | `quit` | 退出 | `app.exit(0)` |
 
 关闭窗口行为：拦截 `CloseRequested` 事件，阻止关闭，改为隐藏到托盘。
@@ -531,7 +532,7 @@ AuthenticationClient         ← 编排类：整合以上所有类，执行完�
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
 | productName | `xxgcxy-wifi` | 产品名 |
-| version | 1.7.11 | 版本号 |
+| version | 1.8.1 | 版本号 |
 | identifier | `com.xxgcxy.wifi` | 应用标识 |
 | 窗口尺寸 | 500×750 | 可调整大小、居中 |
 | 打包目标 | nsis + msi + deb | Windows NSIS/MSI 安装包 + Linux deb |
@@ -642,10 +643,11 @@ AC → 放行该 IP/MAC → 客户端可以上网
 核心原理：AC 劫持 HTTP 请求时只会返回 HTTP 200（Portal 页面）或 HTTP 302（重定向），**AC 绝对不会返回 204**。因此，收到 204 = 请求确实到达了外网真实服务器 = 设备已通过认证。这是无法伪造的信号。
 
 ---
-
 ## 9. 版本历史
 
-- **v1.7.11**：当前版本。内置 PS7 支持、NSIS 安装器、跨平台构建。最近修复包括：`_pw7_` 资源路径修正、便携构建验证步骤优化。
+- **v1.8.1**：当前版本。修复 bat 引号崩溃、重排托盘菜单、手动连接改为仅连 WiFi、执行登录脚本改为直接运行、Linux 缺少 --non-interactive 修复、清理代码警告、完善技术文档。
+- **v1.7.11**：内置 PS7 支持、NSIS 安装器、跨平台构建、`_pw7_` 资源路径修正、便携构建验证步骤优化。
+- **v1.8.1**：当前版本。内置 PS7 支持、NSIS 安装器、跨平台构建。最近修复包括：`_pw7_` 资源路径修正、便携构建验证步骤优化。
 
 ---
 
@@ -697,6 +699,7 @@ main ← PR ← win-portable / win-system-ps7 / linux-sh
 | 系统托盘 | `lib.rs` | `setup_tray` | 788-831 |
 | 应用入口 | `lib.rs` | `run` | 836-900 |
 | 前端状态机 | `index.html` | `checkNetwork` / `reconnectWifi` | 525-690 |
+| 手动连接WiFi | `index.html` | `manualWifiConnect` | 704-773 |
 | 重定向解析 | `xywdl.ps1` | `[RedirectUrlParser]::ParseRedirectUrl` | 237-279 |
 | 自动检测参数 | `xywdl.ps1` | `[AuthenticationClient].TryAutoDetectParams` | 375-433 |
 | DPAPI 密码存储 | `xywdl.ps1` | `[ConfigManager].SaveConfig` / `.LoadConfig` | 67-148 |
