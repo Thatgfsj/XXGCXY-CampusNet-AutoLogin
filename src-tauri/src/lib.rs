@@ -192,11 +192,7 @@ fn clear_campus_net_info() -> Result<(), String> {
     if !path.exists() {
         return Ok(());
     }
-    // 清除隐藏属性,避免 Windows 下因 Hidden 属性导致删除失败
-    #[cfg(windows)]
-    {
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o666));
-    }
+    // fs::remove_file 在 Windows 上能直接删 Hidden 文件,无需先清 Win32 FILE_ATTRIBUTE
     fs::remove_file(&path).map_err(|e| format!("删除校园网配置失败: {}", e))?;
     Ok(())
 }
