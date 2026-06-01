@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 1.8.2 |
+| **当前版本** | 1.8.3 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -71,7 +71,7 @@ XXGCXY-CampusNet-AutoLogin/
 │       └── build-linux.yml        # Linux .deb 构建工作流（仅 tag 触发）
 │
 ├── index.html                     # 前端单页应用（~910行），含完整 CSS + JS
-├── package.json                   # Node.js 项目配置 (campus-wifi, 1.8.2)
+├── package.json                   # Node.js 项目配置 (campus-wifi, 1.8.3)
 ├── package-lock.json              # 依赖锁定文件
 │
 ├── xywdl.ps1                      # ★ 核心认证脚本（~604行，PowerShell 类实现）
@@ -87,7 +87,7 @@ XXGCXY-CampusNet-AutoLogin/
 ├── linux_logs.zip                 # Linux 日志归档
 │
 └── src-tauri/                     # Tauri 后端（Rust）
-    ├── Cargo.toml                 # Rust 包配置 (app, 1.8.2)
+    ├── Cargo.toml                 # Rust 包配置 (app, 1.8.3)
     ├── Cargo.lock                 # 依赖锁定
     ├── build.rs                   # 构建脚本（复制 WebView2Loader.dll）
     ├── tauri.conf.json            # Tauri 配置（窗口、打包、NSIS、插件权限）
@@ -536,7 +536,7 @@ AuthenticationClient         ← 编排类：整合以上所有类，执行完�
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
 | productName | `xxgcxy-wifi` | 产品名 |
-| version | 1.8.2 | 版本号 |
+| version | 1.8.3 | 版本号 |
 | identifier | `com.xxgcxy.wifi` | 应用标识 |
 | 窗口尺寸 | 500×750 | 可调整大小、居中 |
 | 打包目标 | nsis + msi + deb | Windows NSIS/MSI 安装包 + Linux deb |
@@ -649,7 +649,8 @@ AC → 放行该 IP/MAC → 客户端可以上网
 ---
 ## 9. 版本历史
 
-- **v1.8.2**：当前版本。在"网络配置"窗口展示校园网信息(学号/运营商),并提供"清理校园网信息"按钮一键删除登录配置。新增 Tauri 命令 `load_campus_net_info` / `clear_campus_net_info`,后端从 `%APPDATA%/xxgc_campus_net_config.txt` 读取 `UserId` 字段并按 `@` 拆分为学号 + 运营商后缀(移动/联通/电信)。版本号 bump 至 1.8.2。
+- **v1.8.3**：当前版本。修复校园网配置读取路径(同时支持 xywdl.ps1 的 APPDATA 路径与 xywdl.sh 的 `~/.config/xxgcxy-wifi/login_config.json` 路径),Windows 上 Git Bash 用户也能识别;xywdl.bat 顶部加 `chcp 65001 >nul` 切换到 UTF-8 代码页,xywdl.bat / xywdl.ps1 加 UTF-8 BOM 兼容 PowerShell 5。
+- **v1.8.2**：在"网络配置"窗口展示校园网信息(学号/运营商),并提供"清理校园网信息"按钮一键删除登录配置。新增 Tauri 命令 `load_campus_net_info` / `clear_campus_net_info`,后端从 `%APPDATA%/xxgc_campus_net_config.txt` 读取 `UserId` 字段并按 `@` 拆分为学号 + 运营商后缀(移动/联通/电信)。
 - **v1.8.1**：修复 bat 引号崩溃、重排托盘菜单、手动连接改为仅连 WiFi、执行登录脚本改为直接运行、Linux 缺少 --non-interactive 修复、清理代码警告、完善技术文档。
 - **v1.7.11**：内置 PS7 支持、NSIS 安装器、跨平台构建、`_pw7_` 资源路径修正、便携构建验证步骤优化。
 

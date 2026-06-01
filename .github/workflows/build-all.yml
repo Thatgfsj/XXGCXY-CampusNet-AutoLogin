@@ -195,7 +195,7 @@ jobs:
 
       - name: Create Linux packages
         run: |
-          APP_VERSION="1.8.2"
+          APP_VERSION="1.8.3"
           mkdir -p release/linux
 
           # Copy deb package
@@ -345,34 +345,39 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.8.2
-          name: v1.8.2 - xiaoyuanwangluo zidong denglu zhushou
+          tag_name: v1.8.3
+          name: v1.8.3 - xiaoyuanwangluo zidong denglu zhushou
           body: |
-            v1.8.2 - xiaoyuanwangluo zidong denglu zhushou
+            v1.8.3 - xiaoyuanwangluo zidong denglu zhushou
 
             ## Download
 
             **Windows (Built-in PS7, no manual PS7 install needed)**
-            - `xxgcxy-wifi_1.8.2_x64-setup.exe` - NSIS installer
-            - `xxgcxy-wifi_1.8.2_x64_zh-CN.msi` - MSI installer
+            - `xxgcxy-wifi_1.8.3_x64-setup.exe` - NSIS installer
+            - `xxgcxy-wifi_1.8.3_x64_zh-CN.msi` - MSI installer
 
             **Windows (System PS7 required)**
-            - `xxgcxy-wifi_1.8.2_x64-setup_no-ps7.exe` - NSIS installer
-            - `xxgcxy-wifi_1.8.2_x64_zh-CN_no-ps7.msi` - MSI installer
+            - `xxgcxy-wifi_1.8.3_x64-setup_no-ps7.exe` - NSIS installer
+            - `xxgcxy-wifi_1.8.3_x64_zh-CN_no-ps7.msi` - MSI installer
 
             **Linux**
-            - `xxgcxy-wifi_1.8.2_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v1.8.2-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-1.8.2-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_1.8.3_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v1.8.3-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-1.8.3-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs pwsh)
+
+            ## Changelog v1.8.3
+            - Fix: 校园网信息读取同时支持 xywdl.ps1 的 APPDATA 路径与 xywdl.sh 的 `~/.config/xxgcxy-wifi/login_config.json` 路径
+            - Fix: xywdl.bat 顶部加 `chcp 65001 >nul`,修复 GBK 系统下中文 echo 乱码
+            - Fix: xywdl.bat / xywdl.ps1 加 UTF-8 BOM,PowerShell 5 兼容性
+            - Chore: 版本号 bump 至 1.8.3
 
             ## Changelog v1.8.2
             - Feat: 在"网络配置"窗口展示校园网信息(学号/运营商)
             - Feat: 增加"清理校园网信息"按钮,一键删除 `%APPDATA%/xxgc_campus_net_config.txt`
             - Feat: 新增 Tauri 命令 `load_campus_net_info` / `clear_campus_net_info`
-            - Chore: 同步更新 JSDOC.md / SPEC.md,版本号 bump 至 1.8.2
 
             ## Changelog v1.8.1
             - Fix: bat quoting crash when running login script from tray
