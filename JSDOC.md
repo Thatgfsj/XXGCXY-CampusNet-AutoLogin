@@ -701,8 +701,8 @@ main ← PR ← win-portable / win-system-ps7 / linux-sh
 | WiFi 连接 | `lib.rs` | `connect_wifi` | 396-492 |
 | 连通性检测 | `lib.rs` | `check_url` / `check_internet` | 553-664 |
 | 登录脚本调用 | `lib.rs` | `run_login_script` | 693-773 |
-| 校园网配置读取 | `lib.rs` | `load_campus_net_info` / `get_campus_config_path` | 121-187 |
-| 校园网配置清理 | `lib.rs` | `clear_campus_net_info` | 190-201 |
+| 校园网配置读取 | `lib.rs` | `load_campus_net_info` / `get_campus_config_candidates` / `get_campus_config_path` | 128-220 |
+| 校园网配置清理 | `lib.rs` | `clear_campus_net_info` | 222-227 |
 | 校园网信息展示 | `index.html` | `loadCampusNetInfo` / `clearCampusInfo` | 904-936 |
 | 系统托盘 | `lib.rs` | `setup_tray` | 788-831 |
 | 应用入口 | `lib.rs` | `run` | 836-900 |
@@ -712,3 +712,289 @@ main ← PR ← win-portable / win-system-ps7 / linux-sh
 | 自动检测参数 | `xywdl.ps1` | `[AuthenticationClient].TryAutoDetectParams` | 375-433 |
 | DPAPI 密码存储 | `xywdl.ps1` | `[ConfigManager].SaveConfig` / `.LoadConfig` | 67-148 |
 | 认证请求执行 | `xywdl.ps1` | `[AuthenticationClient].PerformAuthentication` | 519-588 |
+
+---
+
+## 12. 问题与修复历史(Issue & Fix Log)
+
+本节按时间顺序记录开发与发布过程中遇到的真实问题、根因分析、修复方案,以及从中得到的可复用经验。供后续维护者参考,避免重复踩坑。
+
+### 12.1 v1.8.2 初次发布:Windows CI 编译失败 — `Permissions::from_mode` not found
+
+**问题现象**
+
+推送 v1.8.2 tag 后,`build-all.yml` 的两个 Windows 作业(`build-win-system` / `build-win-portable`)在 "Build Tauri" 步骤失败;Linux / standalone-sh 作业成功。
+
+**完整错误日志**
+
+```
+error[E0599]: no associated function or constant named `from_mode` found
+              for struct `Permissions` in the current scope
+   --> src\lib.rs:198:61
+    |
+198 |         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o666));
+    |                                                             ^^^^^^^^^^
+    |                                                             associated function or
+    |                                                             constant not found in `Permissions`
+
+error: could not compile `app` (lib) due to 1 previous error; 1 warning emitted
+failed to build app: failed to build app
+```
+
+**根因分析**
+
+v1.8.2 新增的 `clear_campus_net_info` 命令中,为了"清除 Windows Hidden 文件属性以避免 `fs::remove_file` 失败",我写了一段看似合理的代码:
+
+```rust
+#[cfg(windows)]
+{
+    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o666));
+}
+```
+
+这里有两个错位:
+
+1. **API 错位**:`fs::Permissions::from_mode` 是 `std::os::unix::fs::PermissionsExt` 的扩展方法,**仅在 Unix 平台存在**。Windows 编译时 `Permissions` 结构体根本没有 `from_mode` 这个关联函数。
+2. **概念错位**:Windows 的 Hidden 不是 POSIX 权限位,而是 Win32 `FILE_ATTRIBUTE_HIDDEN`(由 `GetFileAttributesW` / `SetFileAttributesW` 控制)。Rust 标准库的 `std::fs::set_permissions` 只覆盖 POSIX 权限位,根本触及不到 FILE_ATTRIBUTE。**在 Windows 上,这行代码既会编译报错,就算想绕过也做不了它声称要做的事。**
+
+我自己的 `#[cfg(windows)]` 条件也是反的——应该是 `#[cfg(unix)]`,却写成了 `#[cfg(windows)]`,直接导致 Windows 编译时选中了这行不存在的 API。
+
+**修复方案**
+
+直接把这段去掉。原因:`fs::remove_file` 在 Windows 上**本身就能删除带 `FILE_ATTRIBUTE_HIDDEN` 的文件**,Hidden 属性只是控制资源管理器默认是否显示,不影响删除操作。
+
+```rust
+#[tauri::command]
+fn clear_campus_net_info() -> Result<(), String> {
+    let path = get_campus_config_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    // fs::remove_file 在 Windows 上能直接删 Hidden 文件,无需先清 Win32 FILE_ATTRIBUTE
+    fs::remove_file(&path).map_err(|e| format!("删除校园网配置失败: {}", e))?;
+    Ok(())
+}
+```
+
+**可复用经验**
+
+- Win32 `FILE_ATTRIBUTE_*`(Hidden / ReadOnly / System)与 POSIX 权限位(rwx)是两套体系。`std::fs::set_permissions` 只覆盖后者;操作前者需要 `windows` crate 的 `SetFileAttributesW`。
+- 跨平台代码中,`std::os::unix::fs::PermissionsExt` 的所有方法(`from_mode` / `mode` / `set_mode`)必须 `#[cfg(unix)]` 包裹。**别用 `#[cfg(windows)]` 误标**——会反向选错。
+- "清除属性后删除"是反模式:大多数文件系统(Hidden / 只读 / immutable)都允许 root / 拥有者直接绕过属性删除。`remove_file` 极少需要先改属性。
+
+### 12.2 v1.8.2 用户反馈:🎓 校园网信息显示"未配置"
+
+**问题现象**
+
+v1.8.2 桌面端 "网络配置" 窗口新增的 🎓 校园网信息卡片里,学号 / 运营商两项均显示"未配置",即便用户已经在 Windows 上跑过登录脚本且 xywdl.ps1 写过配置。
+
+用户原话:
+> 找不到配置文件里面的信息(🎓 校园网信息 学号: 未配置 运营商: 未配置),请参考 xywdl.sh
+
+**根因分析**
+
+v1.8.2 的 Rust 代码只读 `get_campus_config_path()` 返回的单一路径:
+
+- Windows: `%APPDATA%\xxgc_campus_net_config.txt`(xywdl.ps1 写入位置)
+- 其他: `dirs::config_dir() + "xxgc_campus_net_config.txt"`(Linux 走 XDG)
+
+但本项目有 **三个独立的脚本**,写入位置各异:
+
+| 脚本 | 平台 | 配置文件路径 |
+|------|------|--------------|
+| `xywdl.ps1` | Windows(PowerShell) | `$env:APPDATA\xxgc_campus_net_config.txt` |
+| `xywdl.bat` | Windows(批处理,只转发到 .ps1) | 同上 |
+| `xywdl.sh` | Linux / Git Bash(Shell) | `$HOME/.config/xxgcxy-wifi/login_config.json` |
+
+用户的实际场景:在 Windows 上**用 Git Bash 跑过 `xywdl.sh`**(可能从 Linux 机器同步配置,或者直接运行 Shell 版),配置落在了 `C:\Users\thatg\.config\xxgcxy-wifi\login_config.json`,而 Rust 只看 APPDATA 那条路径,所以读不到。
+
+进一步看 `xywdl.sh` 里的 `save_config()`:
+
+```bash
+CONFIG_FILE="$HOME/.config/xxgcxy-wifi/login_config.json"
+```
+
+而 `xywdl.ps1` 里的 `ConfigManager`:
+
+```powershell
+$this.ConfigFilePath = $path  # 来自 (Join-Path $env:APPDATA "xxgc_campus_net_config.txt")
+```
+
+**两套脚本,两套位置,Rust 只适配了其中一套。**
+
+**修复方案(v1.8.3)**
+
+`get_campus_config_candidates()` 返回**所有可能路径**,`get_campus_config_path()` 选第一个存在的:
+
+```rust
+/// 返回所有可能的校园网配置文件路径,按优先级排序。
+///
+/// 同一份配置可能被不同的脚本写入到不同位置:
+/// - xywdl.ps1 (Windows) → `%APPDATA%\xxgc_campus_net_config.txt`
+/// - xywdl.sh (Linux / Git Bash) → `$HOME/.config/xxgcxy-wifi/login_config.json`
+fn get_campus_config_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    #[cfg(windows)]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            paths.push(PathBuf::from(appdata).join("xxgc_campus_net_config.txt"));
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".config").join("xxgcxy-wifi").join("login_config.json"));
+    }
+
+    paths
+}
+
+fn get_campus_config_path() -> PathBuf {
+    get_campus_config_candidates()
+        .into_iter()
+        .find(|p| p.exists())
+        .unwrap_or_else(|| { /* 默认路径用于 clear_campus_net_info 写回 */ })
+}
+```
+
+这样:
+- 原生 Windows 用户 + xywdl.ps1 → 走 APPDATA 路径
+- Windows Git Bash 用户 + xywdl.sh → 走 `~/.config/xxgcxy-wifi/login_config.json`
+- 原生 Linux 用户 + xywdl.sh → 同样走 XDG 路径
+
+**可复用经验**
+
+- 当一个项目有 **多端脚本**(PowerShell / Bash / Python)写同一份配置时,集中路径策略的常见做法:
+  1. **文档化所有写入位置**(本节表格就是为此而生)
+  2. **Reader 端做 fallback 链**,而非 Writer 端做归一化
+  3. 若想完全统一,改用一个跨平台配置文件名 + 跨平台路径(本项目因为历史原因,两套路径已落地,选 reader 兜底是最低成本)
+- 类似的"在 Windows 上跑 Bash 脚本"场景里,`$HOME/.config` 是真实存在的目录(指向 `C:\Users\X\.config`),**不是** Windows 原生 `%APPDATA%`。如果应用要兼容 Git Bash 用户,需要同时识别两种路径风格。
+
+### 12.3 v1.8.2 → v1.8.3 用户反馈:xywdl.bat 中文乱码 / 脚本无法执行
+
+**问题现象**
+
+v1.8.2 用户在中文 Windows 上跑桌面端自动重连,日志反复出现:
+
+```
+[01:03:57] 正在检测网络...
+[01:04:04] 需要登录校园网,正在执行登录...
+[01:04:04] 正在执行登录脚本...
+[01:04:10] 需要登录校园网,正在执行登录...
+[01:04:15] 需要登录校园网,正在执行登录...
+[01:04:16] 需要登录校园网,正在执行登录...
+```
+
+特征:
+- 间隔 6-11 秒,等于"运行脚本 + 失败回退 + 下一次定时检测"的循环
+- 中间没有任何"登录脚本执行成功 / 登录失败"日志(说明脚本大概率非正常退出,前端 invoke 拿到的是异常)
+- 用户手动跑 `xywdl.bat` 时,所有 `echo [信息] ...` / `echo [执行] ...` 都是乱码
+
+用户原话:
+> 登录是使用xywdl.bat 调用内置或者本地的pwsh7,而且修复一下xywdl.bat的编码问题
+
+**根因分析**
+
+`file xywdl.bat` 的输出:
+
+```
+xywdl.bat: DOS batch file, Unicode text, UTF-8 text, with CRLF line terminators
+```
+
+**UTF-8 without BOM**。
+
+中文 Windows 系统下,CMD.exe 默认活动代码页是 **CP936(GBK)**。`xywdl.bat` 是 UTF-8 编码但没有 BOM,CMD 用 GBK 解码 UTF-8 字节流,所有中文字符(例如 `echo [信息] 脚本目录: %SCRIPT_DIR%`)全部显示成乱码。
+
+更关键的是:PowerShell 7(`pwsh.exe`)默认按 UTF-8 读 `.ps1`,所以 `xywdl.ps1` 主体能跑通;但 PowerShell 5.x(`powershell.exe`)是回退方案,它默认按 ANSI(即系统代码页)读 `.ps1`,UTF-8 无 BOM 的 `.ps1` 在 PS 5 下中文部分会被读成乱码,导致脚本行为异常甚至提前退出。
+
+```
+xywdl.bat(UTF-8 无 BOM)
+   └─ CMD 用 GBK 解码 → echo 中文乱码
+       └─ pwsh / powershell -File xywdl.ps1
+           └─ pwsh 7: 默认 UTF-8 → 正常
+           └─ PowerShell 5: 默认 ANSI → 中文部分乱码
+```
+
+**修复方案(v1.8.3)**
+
+两步走:
+
+**1. `xywdl.bat` 顶部强制 UTF-8 代码页**
+
+```batch
+@echo off
+chcp 65001 >nul
+setlocal DisableDelayedExpansion
+...
+```
+
+`chcp 65001` 切换到 UTF-8 代码页(CP65001),CMD 会按 UTF-8 解析后续批处理字节流。
+
+**2. 给 `xywdl.bat` / `xywdl.ps1` 加 UTF-8 BOM(EF BB BF)**
+
+加 BOM 后:
+- 现代 Windows(Win10 1903+)在某些场景下能自动识别 UTF-8,降低乱码概率
+- **PowerShell 5.x 的 parser 看到 BOM 后会按 UTF-8 读整个文件**,而不是默认的 ANSI,这是 PS 5 兼容性的关键
+- pwsh 7 看到 BOM 也 OK,直接跳过
+
+注意: **不要**给 `xywdl.sh` 加 BOM。Bash 的 shebang `#!/bin/bash` 必须严格是文件第一字节,加 BOM 会让某些 Linux 发行版拒绝执行。
+
+**完整修复后 `file` 输出:**
+
+```
+xywdl.bat: DOS batch file, Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
+xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
+```
+
+**可复用经验**
+
+- **Windows 编码三件套**:
+  - 纯 ASCII `.bat` → 任何编码都安全
+  - 包含中文的 `.bat` / `.cmd` → 必须 `chcp 65001 >nul` + UTF-8 BOM
+  - 包含中文的 `.ps1` → 推荐 UTF-8 BOM(PS 5 / PS 7 都吃 BOM)
+  - 包含中文的 `.sh` → 不要 BOM(shebang 不能被污染);如果用 `pwsh` 解释器执行,UTF-8 无 BOM 也 OK
+- 测试方法:不要只在本机 CMD 看一眼就完事,要在"全新未配置过的中文 Windows VM"上跑——很多开发机因为安装过 VS Code / Git 改过系统代码页,本地看似正常,用户机却乱码。
+- 若要彻底解决跨平台编码问题,终极方案是 **多语言资源文件 + Gettext**,但对本项目这种"主要中文界面"的工具,UTF-8 + BOM 已经够用。
+
+### 12.4 v1.8.2 → v1.8.3 GitHub Actions 构建情况对比
+
+| Run ID | commit | 触发 | 结果 | 关键事件 |
+|--------|--------|------|------|----------|
+| 26767835964 | `2e95f09` | tag v1.8.2 | ✅ success | 仅 build-linux.yml,产出 `.deb` |
+| 26768092563 | `2e95f09` | workflow_dispatch build-all | ❌ failure | Windows 编译失败(`from_mode` 报错) |
+| 26768501624 | `c9a2b0e` | workflow_dispatch build-all | ✅ success | 修 `from_mode` 后,4 个 job 全部 OK |
+| 26770393869 | `3691ae5` | tag v1.8.3 | ✅ success | 仅 build-linux.yml,产出 `.deb` |
+| 26770405348 | `3691ae5` | workflow_dispatch build-all | ✅ success | v1.8.3 完整多平台打包 |
+
+**总结**:v1.8.2 的发布流程是"先 tag 触发 Linux + 后修 Windows 编译 + 再补 Windows 构建",中间跨了 3 次 push 才齐全。v1.8.3 起,先在本地验证 Rust 编译,再 tag + workflow_dispatch 同步,避免 v1.8.2 那种中间态。
+
+### 12.5 整体发布流程(本项目既定 SOP)
+
+1. **代码变更后本地**:
+   - `cargo check` 看 Rust 编译(本机 Windows + dlltool 可能需要 MinGW)
+   - 至少在一个 Windows VM 上手动 `xywdl.bat --non-interactive` 跑通,确认编码无乱码、退出码 0
+2. **commit & push 到 main**(commit 作者必须为 Thatgfsj 本人,不能用 AI 身份)
+3. **bump 版本号**:同步更新 4 处
+   - `package.json`
+   - `src-tauri/Cargo.toml`
+   - `src-tauri/Cargo.lock`(`[[package]] name = "app"` 那行)
+   - `src-tauri/tauri.conf.json`
+   - `.github/workflows/build-all.yml`(`APP_VERSION` / `tag_name` / 资产名 / changelog)
+   - 本文档(JSDOC.md) `## 1` / `## 5.x` / `## 9`
+4. **推送 tag**:`git tag -a v1.8.x -m "..." && git push origin v1.8.x`
+   - 自动触发 `build-linux.yml` → 产出 `.deb`
+5. **手动触发 build-all**:`gh workflow run build-all.yml`
+   - 产出 `.deb` / `.rpm` / `.tar.gz` / Windows NSIS / Windows MSI / standalone `.sh`
+   - 同一 run 内自动创建 GitHub Release 并上传所有 artifacts
+6. **验证**:`gh release view v1.8.x` 确认资产齐全
+
+**版本号策略**:按用户规则"它发布了多少你就更新多少",每次用户认可的 commit 都 bump 一个小版本(1.8.1 → 1.8.2 → 1.8.3)。尚未涉及 minor / major bump,需要时另议。
+
+### 12.6 已知遗留 / 待办
+
+- [ ] 桌面端运行 `xywdl.bat` 后,如果用户从未配置过,会进入交互模式(Read-Host)。当前 Rust 端 `run_login_script` 总是带 `--non-interactive`,如果脚本走非交互 + 已有 config 路径,正常;如果走非交互但自动检测参数失败(无 redirect URL 又无 config),脚本会直接 `exit 1`,Rust 端拿到非零退出码会"登录失败"。这种情况下用户需要 **先手动跑一次 `xywdl.bat` 完成首次配置**,桌面端再接管。后续可在桌面端加"首次配置引导"功能。
+- [ ] GitHub Actions 提示:Node 20 actions 即将在 2026-09 被移除,需要升级到 Node 24 versions(影响 `actions/checkout@v4` / `actions/setup-node@v4` / `actions/upload-artifact@v4` / `softprops/action-gh-release@v1`)。目前未影响功能,后续要升级。
+- [ ] `windows-latest` runner 将于 2026-06-15 重定向到 `windows-2025-vs2026`,可能需要适配新版 Visual Studio。
+- [ ] 校园网信息显示目前是只读 + 一键清理,**没有"编辑"入口**。如果用户换了学号或运营商,只能重新跑登录脚本,UI 上无法直接改。这个看用户后续需求决定要不要做。
+
+
