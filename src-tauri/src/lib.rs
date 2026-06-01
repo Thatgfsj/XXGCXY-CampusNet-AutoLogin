@@ -108,7 +108,7 @@ pub struct NetworkStatus {
     pub needs_login: bool,
 }
 
-// ============= 校园网信息(由 xywdl.ps1 写入 APPDATA) =============
+// ============= 校园网信息(由 xywdl.ps1 / xywdl.sh 写入) =============
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CampusNetInfo {
@@ -118,18 +118,50 @@ pub struct CampusNetInfo {
     pub ssid: String,
 }
 
-fn get_campus_config_path() -> PathBuf {
-    // 与 xywdl.ps1 一致: $env:APPDATA\xxgc_campus_net_config.txt
-    // Linux 下退回到 ~/.config 兼容
+/// 返回所有可能的校园网配置文件路径,按优先级排序。
+///
+/// 同一份配置可能被不同的脚本写入到不同位置:
+/// - xywdl.ps1 (Windows) → `%APPDATA%\xxgc_campus_net_config.txt`
+/// - xywdl.sh (Linux / Git Bash) → `$HOME/.config/xxgcxy-wifi/login_config.json`
+///
+/// 在 Windows 上有些用户用 Git Bash 跑 .sh,会把配置写到 Bash 风格路径,这里两个都尝试。
+fn get_campus_config_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
     #[cfg(windows)]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
-            return PathBuf::from(appdata).join("xxgc_campus_net_config.txt");
+            paths.push(PathBuf::from(appdata).join("xxgc_campus_net_config.txt"));
         }
     }
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("xxgc_campus_net_config.txt")
+
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".config").join("xxgcxy-wifi").join("login_config.json"));
+    }
+
+    paths
+}
+
+fn get_campus_config_path() -> PathBuf {
+    get_campus_config_candidates()
+        .into_iter()
+        .find(|p| p.exists())
+        .unwrap_or_else(|| {
+            // 默认路径:Windows APPDATA,其他 ~/.config/xxgcxy-wifi/login_config.json
+            #[cfg(windows)]
+            {
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("xxgc_campus_net_config.txt")
+            }
+            #[cfg(not(windows))]
+            {
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("xxgcxy-wifi")
+                    .join("login_config.json")
+            }
+        })
 }
 
 fn operator_from_suffix(suffix: &str) -> &'static str {

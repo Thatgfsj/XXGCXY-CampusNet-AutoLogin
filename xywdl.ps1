@@ -1,4 +1,4 @@
-class NetworkConfig {
+﻿class NetworkConfig {
     [string] $BaseURL
     [string] $WlanAcName
     [string] $WlanAcIp
