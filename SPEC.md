@@ -64,7 +64,17 @@
   - `serde_json`: JSON序列化
   - `tokio`: 异步运行时
 
-### 3.2 数据存储
+### 3.2.x 校园网信息展示(v1.8.2+)
+
+- 在"网络配置"窗口中展示校园网登录信息:
+  - **学号**:从 `%APPDATA%/xxgc_campus_net_config.txt` 的 `UserId` 字段按 `@` 拆出
+  - **运营商**:后缀映射 — `@xxgcyd`=移动、`@xxgclt`=联通、`@xxgcdx`=电信
+- 提供"清理校园网信息"按钮,带二次确认,删除登录配置后下次需要重新运行登录脚本
+- 新增 Tauri 命令:
+  - `load_campus_net_info` → `CampusNetInfo { configured, student_id, operator, ssid }`
+  - `clear_campus_net_info` → `Result<()>`
+
+### 3.3 数据存储
 
 ```json
 {
@@ -75,7 +85,7 @@
 }
 ```
 
-### 3.3 文件结构
+### 3.4 文件结构
 
 ```
 wifi/
@@ -97,3 +107,5 @@ wifi/
 8. ✅ WiFi连接后无法上网时自动运行xywdl.ps1
 9. ✅ 中文界面，无乱码问题
 10. ✅ 程序图标正常显示
+11. ✅ "网络配置"窗口展示校园网学号与运营商
+12. ✅ "清理校园网信息"按钮可一键删除登录配置

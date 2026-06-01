@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 1.8.1 |
+| **当前版本** | 1.8.2 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -71,7 +71,7 @@ XXGCXY-CampusNet-AutoLogin/
 │       └── build-linux.yml        # Linux .deb 构建工作流（仅 tag 触发）
 │
 ├── index.html                     # 前端单页应用（~910行），含完整 CSS + JS
-├── package.json                   # Node.js 项目配置 (campus-wifi, 1.8.1)
+├── package.json                   # Node.js 项目配置 (campus-wifi, 1.8.2)
 ├── package-lock.json              # 依赖锁定文件
 │
 ├── xywdl.ps1                      # ★ 核心认证脚本（~604行，PowerShell 类实现）
@@ -87,7 +87,7 @@ XXGCXY-CampusNet-AutoLogin/
 ├── linux_logs.zip                 # Linux 日志归档
 │
 └── src-tauri/                     # Tauri 后端（Rust）
-    ├── Cargo.toml                 # Rust 包配置 (app, 1.8.1)
+    ├── Cargo.toml                 # Rust 包配置 (app, 1.8.2)
     ├── Cargo.lock                 # 依赖锁定
     ├── build.rs                   # 构建脚本（复制 WebView2Loader.dll）
     ├── tauri.conf.json            # Tauri 配置（窗口、打包、NSIS、插件权限）
@@ -336,6 +336,8 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 | `get_autostart_enabled` | — | `bool` | 获取开机自启状态 |
 | `set_autostart_enabled` | `enabled: bool` | `Result<()>` | 设置开机自启 |
 | `open_github` | — | `Result<()>` | 打开 GitHub 仓库 |
+| `load_campus_net_info` | — | `Result<CampusNetInfo>` | 读取校园网配置(学号/运营商) |
+| `clear_campus_net_info` | — | `Result<()>` | 删除校园网配置文件 |
 
 ---
 
@@ -361,6 +363,8 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 - WiFi 列表（带信号强度、可点击选择主/备用网络）
 - 已选主网络 / 备用网络显示
 - 检测间隔输入（5-300 秒）
+- 校园网信息卡片(学号 / 运营商,来源:xywdl.ps1 写入的 `%APPDATA%/xxgc_campus_net_config.txt`)
+- 清理校园网信息按钮(带二次确认)
 - 保存 / 返回按钮
 
 #### 5.2.2 核心状态机
@@ -532,7 +536,7 @@ AuthenticationClient         ← 编排类：整合以上所有类，执行完�
 | 配置项 | 值 | 说明 |
 |--------|-----|------|
 | productName | `xxgcxy-wifi` | 产品名 |
-| version | 1.8.1 | 版本号 |
+| version | 1.8.2 | 版本号 |
 | identifier | `com.xxgcxy.wifi` | 应用标识 |
 | 窗口尺寸 | 500×750 | 可调整大小、居中 |
 | 打包目标 | nsis + msi + deb | Windows NSIS/MSI 安装包 + Linux deb |
@@ -645,9 +649,9 @@ AC → 放行该 IP/MAC → 客户端可以上网
 ---
 ## 9. 版本历史
 
-- **v1.8.1**：当前版本。修复 bat 引号崩溃、重排托盘菜单、手动连接改为仅连 WiFi、执行登录脚本改为直接运行、Linux 缺少 --non-interactive 修复、清理代码警告、完善技术文档。
+- **v1.8.2**：当前版本。在"网络配置"窗口展示校园网信息(学号/运营商),并提供"清理校园网信息"按钮一键删除登录配置。新增 Tauri 命令 `load_campus_net_info` / `clear_campus_net_info`,后端从 `%APPDATA%/xxgc_campus_net_config.txt` 读取 `UserId` 字段并按 `@` 拆分为学号 + 运营商后缀(移动/联通/电信)。版本号 bump 至 1.8.2。
+- **v1.8.1**：修复 bat 引号崩溃、重排托盘菜单、手动连接改为仅连 WiFi、执行登录脚本改为直接运行、Linux 缺少 --non-interactive 修复、清理代码警告、完善技术文档。
 - **v1.7.11**：内置 PS7 支持、NSIS 安装器、跨平台构建、`_pw7_` 资源路径修正、便携构建验证步骤优化。
-- **v1.8.1**：当前版本。内置 PS7 支持、NSIS 安装器、跨平台构建。最近修复包括：`_pw7_` 资源路径修正、便携构建验证步骤优化。
 
 ---
 
@@ -696,6 +700,9 @@ main ← PR ← win-portable / win-system-ps7 / linux-sh
 | WiFi 连接 | `lib.rs` | `connect_wifi` | 396-492 |
 | 连通性检测 | `lib.rs` | `check_url` / `check_internet` | 553-664 |
 | 登录脚本调用 | `lib.rs` | `run_login_script` | 693-773 |
+| 校园网配置读取 | `lib.rs` | `load_campus_net_info` / `get_campus_config_path` | 121-187 |
+| 校园网配置清理 | `lib.rs` | `clear_campus_net_info` | 190-201 |
+| 校园网信息展示 | `index.html` | `loadCampusNetInfo` / `clearCampusInfo` | 904-936 |
 | 系统托盘 | `lib.rs` | `setup_tray` | 788-831 |
 | 应用入口 | `lib.rs` | `run` | 836-900 |
 | 前端状态机 | `index.html` | `checkNetwork` / `reconnectWifi` | 525-690 |

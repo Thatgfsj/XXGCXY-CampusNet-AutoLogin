@@ -108,6 +108,99 @@ pub struct NetworkStatus {
     pub needs_login: bool,
 }
 
+// ============= 校园网信息(由 xywdl.ps1 写入 APPDATA) =============
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CampusNetInfo {
+    pub configured: bool,
+    pub student_id: String,
+    pub operator: String,
+    pub ssid: String,
+}
+
+fn get_campus_config_path() -> PathBuf {
+    // 与 xywdl.ps1 一致: $env:APPDATA\xxgc_campus_net_config.txt
+    // Linux 下退回到 ~/.config 兼容
+    #[cfg(windows)]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return PathBuf::from(appdata).join("xxgc_campus_net_config.txt");
+        }
+    }
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("xxgc_campus_net_config.txt")
+}
+
+fn operator_from_suffix(suffix: &str) -> &'static str {
+    match suffix {
+        "@xxgcyd" => "移动",
+        "@xxgclt" => "联通",
+        "@xxgcdx" => "电信",
+        _ => "未知",
+    }
+}
+
+#[tauri::command]
+fn load_campus_net_info() -> Result<CampusNetInfo, String> {
+    let path = get_campus_config_path();
+    if !path.exists() {
+        return Ok(CampusNetInfo {
+            configured: false,
+            student_id: String::new(),
+            operator: String::new(),
+            ssid: String::new(),
+        });
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("读取校园网配置失败: {}", e))?;
+    let json: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("解析校园网配置失败: {}", e))?;
+
+    let user_id = json
+        .get("UserId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let ssid = json
+        .get("Ssid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // 拆分 学号@运营商后缀
+    let (student_id, operator) = match user_id.find('@') {
+        Some(idx) => {
+            let id = user_id[..idx].to_string();
+            let op = operator_from_suffix(&user_id[idx..]).to_string();
+            (id, op)
+        }
+        None => (String::new(), String::new()),
+    };
+
+    Ok(CampusNetInfo {
+        configured: !student_id.is_empty(),
+        student_id,
+        operator,
+        ssid,
+    })
+}
+
+#[tauri::command]
+fn clear_campus_net_info() -> Result<(), String> {
+    let path = get_campus_config_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    // 清除隐藏属性,避免 Windows 下因 Hidden 属性导致删除失败
+    #[cfg(windows)]
+    {
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o666));
+    }
+    fs::remove_file(&path).map_err(|e| format!("删除校园网配置失败: {}", e))?;
+    Ok(())
+}
+
 // ============= 全局状态 =============
 
 pub struct AppState {
@@ -896,6 +989,8 @@ pub fn run() {
             get_autostart_enabled,
             set_autostart_enabled,
             open_github,
+            load_campus_net_info,
+            clear_campus_net_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
