@@ -140,7 +140,7 @@
 
 ```
 GET http://172.18.xxx.xxx:6060/quickauth.do
-  ?userid=20210101001%40xxgcyd
+  ?userid=2021110101%40xxgcyd
   &passwd=mypassword123
   &wlanuserip=10.10.50.100
   &wlanacname=XXGC-AC-01
