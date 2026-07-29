@@ -292,6 +292,102 @@
             margin-top: 20px;
         }
 
+        /* ===== 登录配置表单 (v1.9.0+) ===== */
+        .form-group {
+            margin-bottom: 14px;
+        }
+        .form-label {
+            display: block;
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 15px;
+            font-family: inherit;
+            box-sizing: border-box;
+            background: #fff;
+            transition: border-color .2s;
+        }
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .form-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+        .form-hint code {
+            background: #f3f4f6;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 11px;
+        }
+        .form-row {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+        .form-row .form-input { flex: 1; }
+        .form-row .btn-parse {
+            flex: 0 0 auto;
+            padding: 0 16px;
+            background: #667eea;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background .2s;
+        }
+        .form-row .btn-parse:hover { background: #5568d3; }
+        .form-row .btn-parse:disabled { background: #aaa; cursor: not-allowed; }
+
+        .advanced-toggle {
+            margin: 14px 0 8px;
+            padding: 8px 12px;
+            background: #f3f4f6;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #555;
+            cursor: pointer;
+            user-select: none;
+            text-align: center;
+        }
+        .advanced-toggle:hover { background: #e5e7eb; }
+        .advanced-content {
+            border-left: 3px solid #e5e7eb;
+            padding-left: 12px;
+            margin-bottom: 12px;
+        }
+        .form-error {
+            background: #fee2e2;
+            color: #b91c1c;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin: 10px 0;
+            display: none;
+        }
+        .form-success {
+            background: #d1fae5;
+            color: #065f46;
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin: 10px 0;
+            display: none;
+        }
+
         .campus-info-box h3 {
             font-size: 16px;
             margin-bottom: 10px;
@@ -369,6 +465,10 @@
         <button class="btn btn-primary" id="checkNowBtn" onclick="checkNow()">
             🔄 立即检测网络
         </button>
+
+        <button class="btn btn-primary" id="loginAccountBtn" onclick="showLoginConfig(false)" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            🎓 登录（更换）校园网账号
+        </button>
         
         <div class="toggle-container">
             <span class="toggle-label">🔔 自动检测网络</span>
@@ -436,6 +536,9 @@
                 <span class="info-label">运营商:</span>
                 <span class="info-value" id="campusOperator">未配置</span>
             </div>
+            <button class="btn btn-primary" id="changeAccountBtn" onclick="showLoginConfig(false)" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                ✏️ 更改账号信息
+            </button>
             <button class="btn btn-danger" id="clearCampusInfoBtn" onclick="clearCampusInfo()">
                 🗑️ 清理校园网信息
             </button>
@@ -445,6 +548,89 @@
         <div class="btn-group">
             <button class="btn btn-secondary" onclick="showMain()">返回</button>
             <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+        </div>
+    </div>
+
+    <!-- 登录配置界面 (v1.9.0+) -->
+    <div class="container hidden" id="loginConfigScreen">
+        <h1>🎓 校园网账号配置</h1>
+        <p style="margin-bottom: 15px; color: #666;" id="loginConfigHint">
+            请填写校园网账号信息。保存后软件将自动登录。
+        </p>
+
+        <div class="form-error" id="loginConfigError"></div>
+        <div class="form-success" id="loginConfigSuccess"></div>
+
+        <div class="form-group">
+            <label class="form-label" for="loginOperator">运营商</label>
+            <select class="form-select" id="loginOperator">
+                <option value="yd">📱 中国移动 (@xxgcyd)</option>
+                <option value="lt">📡 中国联通 (@xxgclt)</option>
+                <option value="dx">📞 中国电信 (@xxgcdx)</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="loginStudentId">学号</label>
+            <input type="text" class="form-input" id="loginStudentId"
+                   placeholder="例如 2021110101" maxlength="20"
+                   oninput="this.value = this.value.replace(/[^\d]/g, '')">
+            <div class="form-hint">纯数字,系统会自动拼接 <code>@xxgcyd/xxgclt/xxgcdx</code> 后缀</div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="loginPassword">校园网密码</label>
+            <input type="password" class="form-input" id="loginPassword"
+                   placeholder="请输入校园网登录密码" autocomplete="off">
+            <div class="form-hint">密码使用 Windows DPAPI 加密后存储,只在本机本用户可解密</div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="loginBaseUrl">Portal URL <span style="color:#888; font-weight:normal;">(必填)</span></label>
+            <div class="form-row">
+                <input type="text" class="form-input" id="loginBaseUrl"
+                       placeholder="http://172.18.x.x:6060/portal.do">
+                <button type="button" class="btn-parse" onclick="parsePortalUrl()">解析</button>
+            </div>
+            <div class="form-hint">
+                连接校园网 WiFi 后,浏览器访问任意网站,复制地址栏完整 URL 粘贴到此处,然后点「解析」自动填充下方字段
+            </div>
+        </div>
+
+        <div class="advanced-toggle" id="advancedToggle" onclick="toggleAdvanced()">
+            ▶ 高级字段(SSID / AC 名称 / VLAN 等)
+        </div>
+        <div class="advanced-content hidden" id="advancedContent">
+            <div class="form-group">
+                <label class="form-label" for="loginSsid">WiFi 名称 (SSID)</label>
+                <input type="text" class="form-input" id="loginSsid" placeholder="例如 XXGC-Student">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="loginWlanAcName">AC 名称 (wlanacname)</label>
+                <input type="text" class="form-input" id="loginWlanAcName" placeholder="例如 XXGC-AC-01">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="loginWlanAcIp">AC IP (wlanacIp)</label>
+                <input type="text" class="form-input" id="loginWlanAcIp" placeholder="例如 172.18.252.12">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="loginVlan">VLAN ID</label>
+                <input type="text" class="form-input" id="loginVlan" placeholder="例如 1050">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="loginMacAddress">MAC 地址 (留空自动获取)</label>
+                <input type="text" class="form-input" id="loginMacAddress" placeholder="aa:bb:cc:dd:ee:ff">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="loginHostname">主机名 (留空使用本机名)</label>
+                <input type="text" class="form-input" id="loginHostname" placeholder="">
+            </div>
+        </div>
+
+        <div class="btn-group" style="margin-top: 24px;">
+            <button class="btn btn-secondary" id="loginConfigCancelBtn" onclick="cancelLoginConfig()">取消</button>
+            <button class="btn btn-primary" onclick="saveLoginProfile(false)">💾 保存</button>
+            <button class="btn btn-primary" onclick="saveLoginProfile(true)" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">🚀 保存并登录</button>
         </div>
     </div>
 
@@ -471,6 +657,8 @@
         window.onload = async () => {
             addLog('程序已启动');
             await loadConfig();
+            // 检查是否首次启动,未配置校园网账号则强制弹窗
+            await checkFirstRun();
             // 从后端获取检测开关状态
             try {
                 autoCheckEnabled = await invoke('get_check_enabled');
@@ -891,6 +1079,7 @@
         // 显示配置界面
         async function showSetup() {
             document.getElementById('mainScreen').classList.add('hidden');
+            document.getElementById('loginConfigScreen').classList.add('hidden');
             document.getElementById('setupScreen').classList.remove('hidden');
 
             // 扫描WiFi
@@ -934,13 +1123,260 @@
             }
         }
         window.clearCampusInfo = clearCampusInfo;
-        
+
         // 显示主界面
         function showMain() {
             document.getElementById('setupScreen').classList.add('hidden');
+            document.getElementById('loginConfigScreen').classList.add('hidden');
             document.getElementById('mainScreen').classList.remove('hidden');
         }
         window.showMain = showMain;
+
+        // ============= 登录配置屏 (v1.9.0+) =============
+
+        // 是否首次启动(用于控制"取消"按钮行为)
+        let isFirstRunSetup = false;
+
+        // 显示登录配置屏
+        // firstRun: true 表示首次启动,会要求强制配置;false 表示用户主动修改
+        async function showLoginConfig(firstRun) {
+            isFirstRunSetup = !!firstRun;
+
+            document.getElementById('mainScreen').classList.add('hidden');
+            document.getElementById('setupScreen').classList.add('hidden');
+            document.getElementById('loginConfigScreen').classList.remove('hidden');
+
+            // 隐藏错误/成功提示
+            const errEl = document.getElementById('loginConfigError');
+            const okEl = document.getElementById('loginConfigSuccess');
+            errEl.style.display = 'none';
+            okEl.style.display = 'none';
+
+            // 根据 firstRun 调整提示文字和"取消"按钮
+            const hint = document.getElementById('loginConfigHint');
+            const cancelBtn = document.getElementById('loginConfigCancelBtn');
+            if (firstRun) {
+                hint.textContent = '👋 欢迎使用校园网助手!请填写校园网账号信息以开始。';
+                cancelBtn.textContent = '稍后';
+            } else {
+                hint.textContent = '请填写或修改校园网账号信息,保存后将立即生效。';
+                cancelBtn.textContent = '取消';
+            }
+
+            // 回填已有配置
+            try {
+                const profile = await invoke('get_login_profile');
+                if (profile && profile.user_id) {
+                    // 拆分学号/运营商
+                    const atIdx = profile.user_id.indexOf('@');
+                    if (atIdx > 0) {
+                        document.getElementById('loginStudentId').value = profile.user_id.substring(0, atIdx);
+                    }
+                    if (profile.operator) {
+                        document.getElementById('loginOperator').value = profile.operator;
+                    }
+                    document.getElementById('loginBaseUrl').value = profile.base_url || '';
+                    document.getElementById('loginSsid').value = profile.ssid || '';
+                    document.getElementById('loginWlanAcName').value = profile.wlan_ac_name || '';
+                    document.getElementById('loginWlanAcIp').value = profile.wlan_ac_ip || '';
+                    document.getElementById('loginVlan').value = profile.vlan || '';
+                    document.getElementById('loginMacAddress').value = profile.mac_address || '';
+                    document.getElementById('loginHostname').value = profile.hostname || '';
+                }
+            } catch (e) {
+                addLog('读取登录配置失败: ' + e);
+            }
+
+            // 密码框永远清空,要求重新输入
+            document.getElementById('loginPassword').value = '';
+        }
+        window.showLoginConfig = showLoginConfig;
+
+        // 取消登录配置
+        function cancelLoginConfig() {
+            if (isFirstRunSetup) {
+                // 首次启动跳过 → 直接进主页
+                addLog('已跳过登录配置,可在主页随时点击"登录（更换）"按钮重新配置');
+                showMain();
+            } else {
+                showMain();
+            }
+        }
+        window.cancelLoginConfig = cancelLoginConfig;
+
+        // 折叠/展开高级字段
+        function toggleAdvanced() {
+            const content = document.getElementById('advancedContent');
+            const toggle = document.getElementById('advancedToggle');
+            if (content.classList.contains('hidden')) {
+                content.classList.remove('hidden');
+                toggle.textContent = '▼ 高级字段(SSID / AC 名称 / VLAN 等)';
+            } else {
+                content.classList.add('hidden');
+                toggle.textContent = '▶ 高级字段(SSID / AC 名称 / VLAN 等)';
+            }
+        }
+        window.toggleAdvanced = toggleAdvanced;
+
+        // 解析 portal.do URL 自动填表
+        async function parsePortalUrl() {
+            const url = document.getElementById('loginBaseUrl').value.trim();
+            const errEl = document.getElementById('loginConfigError');
+            const okEl = document.getElementById('loginConfigSuccess');
+            errEl.style.display = 'none';
+            okEl.style.display = 'none';
+
+            if (!url) {
+                errEl.textContent = '请先粘贴 Portal URL';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            try {
+                const parsed = await invoke('parse_portal_url', { url });
+                if (parsed.base_url) {
+                    document.getElementById('loginBaseUrl').value = parsed.base_url;
+                }
+                if (parsed.ssid) {
+                    document.getElementById('loginSsid').value = parsed.ssid;
+                }
+                if (parsed.wlan_ac_name) {
+                    document.getElementById('loginWlanAcName').value = parsed.wlan_ac_name;
+                }
+                if (parsed.wlan_ac_ip) {
+                    document.getElementById('loginWlanAcIp').value = parsed.wlan_ac_ip;
+                }
+                if (parsed.vlan) {
+                    document.getElementById('loginVlan').value = parsed.vlan;
+                }
+                if (parsed.mac_address) {
+                    document.getElementById('loginMacAddress').value = parsed.mac_address;
+                }
+                if (parsed.hostname) {
+                    document.getElementById('loginHostname').value = parsed.hostname;
+                }
+
+                // 展开高级字段让用户看到结果
+                const content = document.getElementById('advancedContent');
+                if (content.classList.contains('hidden')) {
+                    toggleAdvanced();
+                }
+
+                okEl.textContent = '✓ 解析成功,字段已自动填充';
+                okEl.style.display = 'block';
+            } catch (e) {
+                errEl.textContent = '解析失败: ' + e;
+                errEl.style.display = 'block';
+            }
+        }
+        window.parsePortalUrl = parsePortalUrl;
+
+        // 保存登录配置
+        // andLogin: true 时保存后立即调 run_login_with_profile
+        async function saveLoginProfile(andLogin) {
+            const errEl = document.getElementById('loginConfigError');
+            const okEl = document.getElementById('loginConfigSuccess');
+            errEl.style.display = 'none';
+            okEl.style.display = 'none';
+
+            const operator = document.getElementById('loginOperator').value;
+            const studentId = document.getElementById('loginStudentId').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            const baseUrl = document.getElementById('loginBaseUrl').value.trim();
+
+            if (!studentId) {
+                errEl.textContent = '请输入学号';
+                errEl.style.display = 'block';
+                return;
+            }
+            if (!/^\d+$/.test(studentId)) {
+                errEl.textContent = '学号必须是纯数字';
+                errEl.style.display = 'block';
+                return;
+            }
+            if (!password) {
+                errEl.textContent = '请输入密码';
+                errEl.style.display = 'block';
+                return;
+            }
+            if (!baseUrl) {
+                errEl.textContent = '请输入 Portal URL';
+                errEl.style.display = 'block';
+                return;
+            }
+
+            // 拼接 user_id = 学号@运营商后缀
+            const operatorSuffix = {
+                'yd': '@xxgcyd', 'lt': '@xxgclt', 'dx': '@xxgcdx'
+            }[operator] || '';
+            const userId = studentId + operatorSuffix;
+
+            const profile = {
+                user_id: userId,
+                operator: operator,
+                ssid: document.getElementById('loginSsid').value.trim(),
+                base_url: baseUrl,
+                wlan_ac_name: document.getElementById('loginWlanAcName').value.trim(),
+                wlan_ac_ip: document.getElementById('loginWlanAcIp').value.trim(),
+                vlan: document.getElementById('loginVlan').value.trim(),
+                wlan_user_ip: '',
+                mac_address: document.getElementById('loginMacAddress').value.trim(),
+                portal_page_id: '3',
+                portal_type: '0',
+                version: '0',
+                bind_ctrl_id: '',
+                hostname: document.getElementById('loginHostname').value.trim(),
+                updated_at: new Date().toISOString(),
+            };
+
+            try {
+                await invoke('save_login_profile', { profile, password });
+                okEl.textContent = '✓ 配置已保存';
+                okEl.style.display = 'block';
+                addLog('校园网账号已保存: ' + userId);
+
+                // 清空密码框
+                document.getElementById('loginPassword').value = '';
+
+                if (andLogin) {
+                    addLog('正在执行登录...');
+                    setTimeout(async () => {
+                        try {
+                            const result = await invoke('run_login_with_profile');
+                            addLog('登录: ' + result);
+                            showMain();
+                            setTimeout(() => checkNow(), 1500);
+                        } catch (e) {
+                            errEl.textContent = '登录失败: ' + e;
+                            errEl.style.display = 'block';
+                            addLog('登录失败: ' + e);
+                        }
+                    }, 500);
+                } else {
+                    setTimeout(() => showMain(), 800);
+                }
+            } catch (e) {
+                errEl.textContent = '保存失败: ' + e;
+                errEl.style.display = 'block';
+                addLog('保存登录配置失败: ' + e);
+            }
+        }
+        window.saveLoginProfile = saveLoginProfile;
+
+        // 应用启动时检查是否已配置,未配置则强制弹窗
+        async function checkFirstRun() {
+            try {
+                const configured = await invoke('is_login_configured');
+                if (!configured) {
+                    addLog('👋 检测到首次启动,请配置校园网账号');
+                    setTimeout(() => showLoginConfig(true), 500);
+                } else {
+                    addLog('✓ 校园网账号已配置');
+                }
+            } catch (e) {
+                addLog('检查登录配置状态失败: ' + e);
+            }
+        }
         
         // 扫描WiFi
         async function scanWifi() {

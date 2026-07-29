@@ -67,15 +67,42 @@
 ### 3.2.x 校园网信息展示(v1.8.2+)
 
 - 在"网络配置"窗口中展示校园网登录信息:
-  - **学号**:从 `%APPDATA%/xxgc_campus_net_config.txt` 的 `UserId` 字段按 `@` 拆出
+  - **学号**:从 `%APPDATA%/xxgc_campus_net_config.txt` 的 `UserId` 字段按 `@` 拆出 (v1.9.0+ 改为从 `login_profile.json` 的 `user_id` 字段读取)
   - **运营商**:后缀映射 — `@xxgcyd`=移动、`@xxgclt`=联通、`@xxgcdx`=电信
 - 提供"清理校园网信息"按钮,带二次确认,删除登录配置后下次需要重新运行登录脚本
 - 新增 Tauri 命令:
   - `load_campus_net_info` → `CampusNetInfo { configured, student_id, operator, ssid }`
   - `clear_campus_net_info` → `Result<()>`
 
+### 3.2.y 登录模块解耦 (v1.9.0+)
+
+- **目标**:把硬编码在 `xywdl.ps1` 中的登录逻辑抽离,改为 JSON 模板 + 渲染器模式,小白用户也能在 UI 里自助配置。
+- **新数据源**:
+  - `%APPDATA%/xxgcxy-wifi/login_profile.json` —— 非敏感元数据
+  - `%APPDATA%/xxgcxy-wifi/login_credential.bin` —— DPAPI 加密的密码
+- **新 UI 屏 `#loginConfigScreen`**:
+  - 运营商下拉(移动/联通/电信)
+  - 学号(纯数字校验,自动拼接 `@xxgcyd/xxgclt/xxgcdx` 后缀)
+  - 密码(DOM 不缓存,保存后清空)
+  - Portal URL + 解析按钮(粘贴 portal.do 重定向 URL 自动填表)
+  - 高级字段折叠(SSID/AC 名称/AC IP/VLAN/MAC/主机名)
+  - 「保存」/「保存并登录」/「取消」按钮
+- **首次启动**:自动弹出登录配置屏(有"稍后"按钮可跳过)
+- **之后入口**:主页"登录（更换）校园网账号"按钮 / 网络配置页"更改账号信息"按钮
+- **新 Tauri 命令**:
+  - `is_login_configured` → `bool`
+  - `get_login_profile` → `Result<LoginProfile>`
+  - `save_login_profile(profile, password)` → `Result<()>`
+  - `clear_login_profile` → `Result<()>`
+  - `parse_portal_url(url)` → `Result<ParsedPortal>`
+  - `run_login_with_profile` → `Result<String>`
+- **xywdl.ps1 简化**:从 604 行的 6 个类改为 ~280 行的函数式脚本,只读 JSON + DPAPI 解密 + 发请求。
+- **DPAPI 链路**:Rust 端 `CryptProtectData`(无 entropy)→ `[b"DPAPI" magic + u32 LE 长度 + 密文]`;PS 端 `ProtectedData.Unprotect($null, CurrentUser)` 解密。
+- **不兼容旧 `%APPDATA%/xxgc_campus_net_config.txt`**:首次启动会引导用户重新配置,`clear_campus_net_info` 会同时清理新旧文件。
+
 ### 3.3 数据存储
 
+**WiFi 配置**(`config.json`):
 ```json
 {
   "primary_ssid": "主网络名称",
@@ -84,6 +111,30 @@
   "test_hosts": ["https://example.com/", "http://connect.rom.miui.com/generate_204"]
 }
 ```
+
+**校园网登录配置 (v1.9.0+,login_profile.json)**:
+```json
+{
+  "user_id": "2021110101@xxgcyd",
+  "operator": "yd",
+  "ssid": "XXGC-Student",
+  "base_url": "http://172.18.252.12:6060/portal.do",
+  "wlan_ac_name": "XXGC-AC-01",
+  "wlan_ac_ip": "172.18.252.12",
+  "vlan": "1050",
+  "wlan_user_ip": "",
+  "mac_address": "aa:bb:cc:dd:ee:ff",
+  "portal_page_id": "3",
+  "portal_type": "0",
+  "version": "0",
+  "bind_ctrl_id": "",
+  "hostname": "",
+  "updated_at": "2026-07-29T12:00:00Z"
+}
+```
+
+**校园网密码 (v1.9.0+,login_credential.bin)**:
+二进制格式: `b"DPAPI" (4 字节 magic) + u32 LE 长度 (4 字节) + CryptProtectData 输出`。Windows DPAPI CurrentUser scope 加密,仅本机本用户可解密。
 
 ### 3.4 文件结构
 
@@ -109,3 +160,8 @@ wifi/
 10. ✅ 程序图标正常显示
 11. ✅ "网络配置"窗口展示校园网学号与运营商
 12. ✅ "清理校园网信息"按钮可一键删除登录配置
+13. ✅ **(v1.9.0+)** 首次启动自动弹出登录配置屏,小白用户也能自助配置账号
+14. ✅ **(v1.9.0+)** 主页"登录（更换）校园网账号"按钮可重新进入配置
+15. ✅ **(v1.9.0+)** 登录配置从硬编码改为 JSON 模板 + DPAPI 加密
+16. ✅ **(v1.9.0+)** Portal URL 一键解析自动填充 SSID/AC/VLAN/MAC 等字段
+17. ✅ **(v1.9.0+)** xywdl.ps1 大幅简化,只读 JSON + 解密 + 发请求

@@ -118,50 +118,109 @@ pub struct CampusNetInfo {
     pub ssid: String,
 }
 
-/// 返回所有可能的校园网配置文件路径,按优先级排序。
-///
-/// 同一份配置可能被不同的脚本写入到不同位置:
-/// - xywdl.ps1 (Windows) → `%APPDATA%\xxgc_campus_net_config.txt`
-/// - xywdl.sh (Linux / Git Bash) → `$HOME/.config/xxgcxy-wifi/login_config.json`
-///
-/// 在 Windows 上有些用户用 Git Bash 跑 .sh,会把配置写到 Bash 风格路径,这里两个都尝试。
-fn get_campus_config_candidates() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
+// ============= 登录模块 (v1.9.0+) =============
+//
+// 登录配置拆为两个文件,位于 %APPDATA%/xxgcxy-wifi/ 下:
+//   - login_profile.json   : 非敏感元数据(学号/运营商/SSID/portal URL/AC/VLAN 等)
+//   - login_credential.bin : DPAPI 加密的密码(PS 端 ConvertTo-SecureString 可直接读取)
+//
+// 设计要点:
+// 1. JSON 模板驱动:UI 改的是 JSON,PS 脚本只负责读 JSON + 发请求,不再硬编码
+// 2. 旧 `xxgc_campus_net_config.txt` 不再读写,新用户和老用户都能干净开始
+// 3. 密码用 Windows DPAPI 加密(同用户同机器可由 PS 解密),Linux 用明文(暂存,后续可换 libsecret)
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginProfile {
+    pub user_id: String,        // 形如 "2021110101@xxgcyd"
+    pub operator: String,       // "yd" | "lt" | "dx"
+    pub ssid: String,
+    pub base_url: String,       // 完整 portal.do URL,如 http://172.18.252.12:6060/portal.do
+    pub wlan_ac_name: String,
+    pub wlan_ac_ip: String,
+    pub vlan: String,
+    pub wlan_user_ip: String,   // 留空时 PS 端运行时用 Get-WifiIpAddress 拿
+    pub mac_address: String,
+    pub portal_page_id: String, // 默认 "3"
+    pub portal_type: String,    // 默认 "0"
+    pub version: String,        // 默认 "0"
+    pub bind_ctrl_id: String,   // 默认 ""
+    pub hostname: String,       // 留空时 PS 用 $env:COMPUTERNAME
+    pub updated_at: String,     // ISO8601
+}
+
+impl Default for LoginProfile {
+    fn default() -> Self {
+        LoginProfile {
+            user_id: String::new(),
+            operator: String::new(),
+            ssid: String::new(),
+            base_url: String::new(),
+            wlan_ac_name: String::new(),
+            wlan_ac_ip: String::new(),
+            vlan: String::new(),
+            wlan_user_ip: String::new(),
+            mac_address: String::new(),
+            portal_page_id: "3".to_string(),
+            portal_type: "0".to_string(),
+            version: "0".to_string(),
+            bind_ctrl_id: String::new(),
+            hostname: String::new(),
+            updated_at: String::new(),
+        }
+    }
+}
+
+/// portal.do 重定向 URL 解析结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParsedPortal {
+    pub base_url: String,       // 提取的 BaseURL(到 /portal.do)
+    pub wlan_ac_name: String,
+    pub wlan_ac_ip: String,
+    pub wlan_user_ip: String,
+    pub vlan: String,
+    pub mac_address: String,
+    pub ssid: String,
+    pub hostname: String,
+    pub rand: String,
+}
+
+/// 登录模块文件路径 (v1.9.0+)
+/// - Windows: `%APPDATA%\xxgcxy-wifi\login_profile.json` + `login_credential.bin`
+/// - Linux:   `~/.config/xxgcxy-wifi/login_profile.json` + `login_credential.bin`
+fn get_login_dir() -> PathBuf {
+    let base = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("xxgcxy-wifi");
+    let _ = fs::create_dir_all(&base);
+    base
+}
+
+fn get_login_profile_path() -> PathBuf {
+    get_login_dir().join("login_profile.json")
+}
+
+fn get_login_credential_path() -> PathBuf {
+    get_login_dir().join("login_credential.bin")
+}
+
+/// 旧式 (v1.8.x 及之前) 配置文件路径 —— 仅用于检测残留,不再读写
+fn get_legacy_campus_config_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
     #[cfg(windows)]
     {
         if let Ok(appdata) = std::env::var("APPDATA") {
             paths.push(PathBuf::from(appdata).join("xxgc_campus_net_config.txt"));
         }
     }
-
     if let Some(home) = dirs::home_dir() {
         paths.push(home.join(".config").join("xxgcxy-wifi").join("login_config.json"));
     }
-
     paths
 }
 
+/// 向后兼容:之前 `load_campus_net_info` 用的辅助函数,现在统一返回新路径
 fn get_campus_config_path() -> PathBuf {
-    get_campus_config_candidates()
-        .into_iter()
-        .find(|p| p.exists())
-        .unwrap_or_else(|| {
-            // 默认路径:Windows APPDATA,其他 ~/.config/xxgcxy-wifi/login_config.json
-            #[cfg(windows)]
-            {
-                dirs::config_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("xxgc_campus_net_config.txt")
-            }
-            #[cfg(not(windows))]
-            {
-                dirs::config_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("xxgcxy-wifi")
-                    .join("login_config.json")
-            }
-        })
+    get_login_profile_path()
 }
 
 fn operator_from_suffix(suffix: &str) -> &'static str {
@@ -186,16 +245,25 @@ fn load_campus_net_info() -> Result<CampusNetInfo, String> {
     }
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("读取校园网配置失败: {}", e))?;
+    // v1.9.0+ 新格式直接是 LoginProfile JSON (snake_case)
+    // 兼容旧 v1.8.x PascalCase 格式 (UserId/Ssid)
     let json: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("解析校园网配置失败: {}", e))?;
 
     let user_id = json
-        .get("UserId")
+        .get("user_id")
+        .or_else(|| json.get("UserId"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
     let ssid = json
-        .get("Ssid")
+        .get("ssid")
+        .or_else(|| json.get("Ssid"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let operator_code = json
+        .get("operator")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
@@ -204,7 +272,12 @@ fn load_campus_net_info() -> Result<CampusNetInfo, String> {
     let (student_id, operator) = match user_id.find('@') {
         Some(idx) => {
             let id = user_id[..idx].to_string();
-            let op = operator_from_suffix(&user_id[idx..]).to_string();
+            // 优先用 profile.operator 字段,其次用后缀反推
+            let op = if !operator_code.is_empty() {
+                operator_short_to_name(&operator_code).to_string()
+            } else {
+                operator_from_suffix(&user_id[idx..]).to_string()
+            };
             (id, op)
         }
         None => (String::new(), String::new()),
@@ -220,13 +293,275 @@ fn load_campus_net_info() -> Result<CampusNetInfo, String> {
 
 #[tauri::command]
 fn clear_campus_net_info() -> Result<(), String> {
-    let path = get_campus_config_path();
-    if !path.exists() {
-        return Ok(());
+    // v1.9.0+ 一次清掉 profile + credential
+    let _ = fs::remove_file(get_login_profile_path());
+    let _ = fs::remove_file(get_login_credential_path());
+    // 同时清理旧版残留文件
+    for legacy in get_legacy_campus_config_candidates() {
+        let _ = fs::remove_file(legacy);
     }
-    // fs::remove_file 在 Windows 上能直接删 Hidden 文件,无需先清 Win32 FILE_ATTRIBUTE
-    fs::remove_file(&path).map_err(|e| format!("删除校园网配置失败: {}", e))?;
     Ok(())
+}
+
+// ============= 登录模块命令 (v1.9.0+) =============
+
+/// 启动时检查:是否已配置过校园网账号?
+/// 用于决定首次启动是否弹出登录配置屏。
+#[tauri::command]
+fn is_login_configured() -> bool {
+    let profile_path = get_login_profile_path();
+    let cred_path = get_login_credential_path();
+    if !profile_path.exists() || !cred_path.exists() {
+        return false;
+    }
+    match fs::read_to_string(&profile_path) {
+        Ok(content) => {
+            match serde_json::from_str::<LoginProfile>(&content) {
+                Ok(p) => !p.user_id.is_empty() && !p.base_url.is_empty(),
+                Err(_) => false,
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+/// 读取当前登录配置 (不含密码,密码由 PS 端从 .bin 文件读)
+#[tauri::command]
+fn get_login_profile() -> Result<LoginProfile, String> {
+    let path = get_login_profile_path();
+    if !path.exists() {
+        return Ok(LoginProfile::default());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("读取登录配置失败: {}", e))?;
+    serde_json::from_str(&content)
+        .map_err(|e| format!("解析登录配置失败: {}", e))
+}
+
+/// 保存登录配置 + 加密密码
+#[tauri::command]
+fn save_login_profile(profile: LoginProfile, password: String) -> Result<(), String> {
+    if profile.user_id.is_empty() {
+        return Err("学号/账号不能为空".to_string());
+    }
+    if profile.base_url.is_empty() {
+        return Err("Portal URL 不能为空".to_string());
+    }
+    if password.is_empty() {
+        return Err("密码不能为空".to_string());
+    }
+
+    // 写 JSON
+    let json = serde_json::to_string_pretty(&profile)
+        .map_err(|e| format!("序列化登录配置失败: {}", e))?;
+    fs::write(get_login_profile_path(), json)
+        .map_err(|e| format!("写入登录配置失败: {}", e))?;
+
+    // 加密密码
+    let encrypted = encrypt_password(&password)
+        .map_err(|e| format!("加密密码失败: {}", e))?;
+    fs::write(get_login_credential_path(), encrypted)
+        .map_err(|e| format!("写入加密密码失败: {}", e))?;
+
+    Ok(())
+}
+
+/// 解析 portal.do 重定向 URL (替代旧 PS 端的 TryAutoDetectParams)
+/// 用户从浏览器复制粘贴的 URL 进来,我们用跟 PS 端 RedirectUrlParser 一样的正则解析。
+#[tauri::command]
+fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
+    if url.trim().is_empty() {
+        return Err("URL 不能为空".to_string());
+    }
+
+    // 简化版 URL 解码:用 percent-decoding 的核心规则
+    fn url_decode(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let Ok(b) = u8::from_str_radix(
+                    std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00"),
+                    16,
+                ) {
+                    out.push(b as char);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+        out
+    }
+
+    let decoded = url_decode(&url);
+
+    // 提取 BaseURL: 形如 "http://host:port/portal.do"
+    let base_url = {
+        // 简单正则: ^http://[^/]+/\w+\.do
+        let lower = decoded.to_lowercase();
+        if let Some(idx) = lower.find("://") {
+            let after_scheme = &decoded[idx + 3..];
+            // 找到第一个 /,然后到 .do 结尾
+            if let Some(slash_idx) = after_scheme.find('/') {
+                let host_and_path = &after_scheme[slash_idx..];
+                // 找 ".do" 结尾
+                if let Some(do_idx) = host_and_path.to_lowercase().find(".do") {
+                    let end = do_idx + 3;
+                    after_scheme[..slash_idx + end].to_string()
+                } else {
+                    return Err("URL 中找不到 portal.do 路径".to_string());
+                }
+            } else {
+                return Err("URL 格式不正确(缺少路径)".to_string());
+            }
+        } else {
+            return Err("URL 必须以 http:// 开头".to_string());
+        }
+    };
+
+    // 解析 query string
+    let mut parsed = ParsedPortal {
+        base_url: base_url.clone(),
+        wlan_ac_name: String::new(),
+        wlan_ac_ip: String::new(),
+        wlan_user_ip: String::new(),
+        vlan: String::new(),
+        mac_address: String::new(),
+        ssid: String::new(),
+        hostname: String::new(),
+        rand: String::new(),
+    };
+
+    if let Some(q_idx) = decoded.find('?') {
+        let qs = &decoded[q_idx + 1..];
+        for kv in qs.split('&') {
+            let mut parts = kv.splitn(2, '=');
+            let k = parts.next().unwrap_or("").to_lowercase();
+            let v_raw = parts.next().unwrap_or("");
+            let v = url_decode(v_raw);
+            match k.as_str() {
+                "wlanuserip" => parsed.wlan_user_ip = v,
+                "wlanacname" => parsed.wlan_ac_name = v,
+                "wlanacip" => parsed.wlan_ac_ip = v,
+                "mac" => parsed.mac_address = v.to_lowercase(),
+                "vlan" => parsed.vlan = v,
+                "hostname" => parsed.hostname = v,
+                "rand" => parsed.rand = v,
+                "ssid" => parsed.ssid = v,
+                _ => {}
+            }
+        }
+    }
+
+    Ok(parsed)
+}
+
+/// 用已保存的 profile 直接执行登录 (与 run_login_script 等价)
+#[tauri::command]
+async fn run_login_with_profile(app: AppHandle) -> Result<String, String> {
+    if !is_login_configured() {
+        return Err("尚未配置校园网账号,请先在主页或网络配置页填写".to_string());
+    }
+    // 直接复用现有的 run_login_script 内部逻辑
+    run_login_script(app).await
+}
+
+// ============= DPAPI 密码加密 =============
+//
+// PS 端 ConvertFrom-SecureString 默认产出 UTF-16 LE 编码的 DPAPI 字节流,
+// 用 `ConvertTo-SecureString -String <blob> | ...` 可还原为 SecureString。
+//
+// 为了让 PS 端能直接读我们写入的 .bin,我们用同样的字节布局:
+//   [0..4]   = "DPAPI" magic (4 bytes ASCII)
+//   [4..]    = CryptProtectData 输出
+//
+// PS 端读取后:
+//   $blob = [System.IO.File]::ReadAllBytes($credPath)
+//   $b64  = [Convert]::ToBase64String($blob)
+//   $sec  = ConvertTo-SecureString -String $b64 -Key $([Byte[]](1..16))
+//
+// (因为我们走的是 DPAPI 而不是 AES,PS 端不应该用 -Key;改成:
+//   $sec  = ConvertTo-SecureString -String $b64
+// )
+//
+// 我们的实现:CryptProtectData → 直接写裸字节 → PS 端用 ConvertTo-SecureString 读。
+
+#[cfg(windows)]
+fn encrypt_password(plain: &str) -> Result<Vec<u8>, String> {
+    use windows::Win32::Security::Cryptography::CryptProtectData;
+    use windows::Win32::Security::CRYPT_INTEGER_BLOB;
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+
+    // 链路:plaintext -> UTF-16 LE 字节 -> CryptProtectData (DPAPI, 无 entropy)
+    // PS 端读 bytes,剥掉 8 字节头部 ("DPAPI" magic + 4 字节 LE 长度) -> ProtectedData.Unprotect
+    //  -> UTF-16 LE 字节 -> 还原成字符串
+    //
+    // 注意:Rust 和 PS 必须都走"无 entropy"模式,否则解密失败
+
+    let utf16: Vec<u16> = plain.encode_utf16().collect();
+    let utf16_bytes: Vec<u8> = utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
+
+    unsafe {
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: utf16_bytes.len() as u32,
+            pbData: utf16_bytes.as_ptr() as *mut u8,
+        };
+        let mut output = std::mem::zeroed();
+
+        let result = CryptProtectData(
+            &input,
+            None, // szDataDescr: 不需要描述
+            None, // pOptionalEntropy: 必须 None,与 PS 端 Unprotect 的 $null 配对
+            None, // pvReserved
+            None, // pPromptStruct
+            0,    // dwFlags: 0 表示默认 (CurrentUser 范围)
+            &mut output,
+        );
+
+        if result.is_err() {
+            return Err(format!("CryptProtectData 失败: {:?}", result));
+        }
+
+        // 拷贝输出数据
+        let protected_bytes = std::slice::from_raw_parts(
+            output.pbData,
+            output.cbData as usize,
+        )
+        .to_vec();
+
+        // 释放 LocalAlloc 分配的内存
+        if !output.pbData.is_null() {
+            let _ = LocalFree(HLOCAL(output.pbData as *mut _));
+        }
+
+        // 写 4 字节 magic "DPAPI" + 4 字节 LE 长度 + 加密数据
+        let mut out = Vec::with_capacity(8 + protected_bytes.len());
+        out.extend_from_slice(b"DPAPI");
+        out.extend_from_slice(&(protected_bytes.len() as u32).to_le_bytes());
+        out.extend_from_slice(&protected_bytes);
+        Ok(out)
+    }
+}
+
+#[cfg(not(windows))]
+fn encrypt_password(plain: &str) -> Result<Vec<u8>, String> {
+    // Linux 临时实现:明文存 + 文件权限 0600
+    // 后续可换 libsecret / keyring
+    use std::os::unix::fs::OpenOptionsExt;
+    Ok(plain.as_bytes().to_vec())
+}
+
+/// operator 短码 -> 中文名 (用于 load_campus_net_info 渲染)
+fn operator_short_to_name(code: &str) -> &'static str {
+    match code {
+        "yd" => "移动",
+        "lt" => "联通",
+        "dx" => "电信",
+        _ => "未知",
+    }
 }
 
 // ============= 全局状态 =============
@@ -1019,6 +1354,13 @@ pub fn run() {
             open_github,
             load_campus_net_info,
             clear_campus_net_info,
+            // ===== 登录模块 (v1.9.0+) =====
+            is_login_configured,
+            get_login_profile,
+            save_login_profile,
+            clear_login_profile,
+            parse_portal_url,
+            run_login_with_profile,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -330,14 +330,58 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 | `connect_wifi` | `ssid: String` | `Result<()>` | 连接指定 WiFi |
 | `get_wifi_signal` | `ssid: String` | `Result<u8>` | 获取指定 SSID 信号强度 |
 | `check_network` | — | `Result<NetworkStatus>` | 综合网络状态检测 |
-| `run_login_script` | — | `Result<String>` | 执行登录脚本 |
+| `run_login_script` | — | `Result<String>` | 执行登录脚本(兼容旧版本) |
 | `get_check_enabled` | — | `bool` | 获取自动检测开关状态 |
 | `toggle_check_enabled` | — | `bool` | 切换自动检测开关 |
 | `get_autostart_enabled` | — | `bool` | 获取开机自启状态 |
 | `set_autostart_enabled` | `enabled: bool` | `Result<()>` | 设置开机自启 |
 | `open_github` | — | `Result<()>` | 打开 GitHub 仓库 |
 | `load_campus_net_info` | — | `Result<CampusNetInfo>` | 读取校园网配置(学号/运营商) |
-| `clear_campus_net_info` | — | `Result<()>` | 删除校园网配置文件 |
+| `clear_campus_net_info` | — | `Result<()>` | 删除校园网配置 + 旧文件清理 |
+| `is_login_configured` | — | `bool` | **(v1.9.0+)** 是否已配置校园网账号 |
+| `get_login_profile` | — | `Result<LoginProfile>` | **(v1.9.0+)** 读取登录配置(不含密码) |
+| `save_login_profile` | `profile: LoginProfile, password: String` | `Result<()>` | **(v1.9.0+)** 保存登录配置 + DPAPI 加密密码 |
+| `clear_login_profile` | — | `Result<()>` | **(v1.9.0+)** 删除登录配置 + 凭据 |
+| `parse_portal_url` | `url: String` | `Result<ParsedPortal>` | **(v1.9.0+)** 解析 portal.do 重定向 URL |
+| `run_login_with_profile` | — | `Result<String>` | **(v1.9.0+)** 用已保存的 profile 执行登录 |
+
+**登录模块数据结构 (v1.9.0+)**:
+
+```rust
+pub struct LoginProfile {
+    pub user_id: String,        // "2021110101@xxgcyd"
+    pub operator: String,       // "yd" | "lt" | "dx"
+    pub ssid: String,
+    pub base_url: String,       // 完整 portal.do URL
+    pub wlan_ac_name: String,
+    pub wlan_ac_ip: String,
+    pub vlan: String,
+    pub wlan_user_ip: String,   // 留空时 PS 端运行时取
+    pub mac_address: String,
+    pub portal_page_id: String, // 默认 "3"
+    pub portal_type: String,    // 默认 "0"
+    pub version: String,        // 默认 "0"
+    pub bind_ctrl_id: String,   // 默认 ""
+    pub hostname: String,       // 留空时 PS 用 $env:COMPUTERNAME
+    pub updated_at: String,     // ISO8601
+}
+
+pub struct ParsedPortal {
+    pub base_url: String,
+    pub wlan_ac_name: String,
+    pub wlan_ac_ip: String,
+    pub wlan_user_ip: String,
+    pub vlan: String,
+    pub mac_address: String,
+    pub ssid: String,
+    pub hostname: String,
+    pub rand: String,
+}
+```
+
+**登录模块文件位置**:
+- Windows: `%APPDATA%\xxgcxy-wifi\login_profile.json` + `login_credential.bin`
+- Linux:   `~/.config/xxgcxy-wifi/login_profile.json` + `login_credential.bin`
 
 ---
 
@@ -347,24 +391,35 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 
 #### 5.2.1 界面结构
 
-两个屏幕，通过 `.hidden` 类切换显示：
+三个屏幕，通过 `.hidden` 类切换显示：
 
 **主界面（mainScreen）**：
 - 状态面板（图标 + 状态文字 + 详情）
 - 网络信息面板（当前 WiFi / 主网络 / 备用网络 / 检测间隔）
 - "立即检测网络" 按钮
+- "登录（更换）校园网账号" 按钮(v1.9.0+,跳转 loginConfigScreen)
 - 自动检测开关（toggle）
 - 开机自启动开关（toggle）
 - "网络配置" 按钮 → 切换到配置界面
 - 日志面板（黑色终端风格，保留最近 50 条）
 - GitHub 链接
 
+**登录配置界面（loginConfigScreen, v1.9.0+）**:
+- 运营商下拉(移动/联通/电信)
+- 学号输入(纯数字校验)
+- 密码输入(DOM 不缓存,每次保存后清空)
+- Portal URL 输入 + 「解析」按钮(粘贴 portal.do 重定向 URL 自动填表)
+- 高级字段折叠区(SSID / AC 名称 / AC IP / VLAN / MAC / 主机名)
+- 「保存」/「保存并登录」/「取消」按钮
+- 首次启动时强制弹出,提供"稍后"按钮可跳过
+
 **配置界面（setupScreen）**：
 - WiFi 列表（带信号强度、可点击选择主/备用网络）
 - 已选主网络 / 备用网络显示
 - 检测间隔输入（5-300 秒）
-- 校园网信息卡片(学号 / 运营商,来源:xywdl.ps1 写入的 `%APPDATA%/xxgc_campus_net_config.txt`)
-- 清理校园网信息按钮(带二次确认)
+- 校园网信息卡片(学号 / 运营商,来源:`%APPDATA%/xxgcxy-wifi/login_profile.json` v1.9.0+)
+- "更改账号信息" 按钮(v1.9.0+,跳转 loginConfigScreen)
+- 清理校园网信息按钮(带二次确认,同时清理旧 `xxgc_campus_net_config.txt`)
 - 保存 / 返回按钮
 
 #### 5.2.2 核心状态机
@@ -401,72 +456,73 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 
 ### 5.3 PowerShell 认证脚本 (`xywdl.ps1`)
 
-**文件行数**：604 行  
-**架构**：6 个 PowerShell 类，面向对象设计
+**文件行数**：~280 行（v1.9.0+ 大幅简化）
+**架构**：函数式 + 数据驱动（不再面向对象）
 
-#### 5.3.1 类继承关系
+#### 5.3.1 架构变化 (v1.9.0+)
 
-```
-NetworkConfig                ← 数据类：请求参数模型
-DomainConfig                 ← 工具类（静态）：运营商后缀映射
-ConfigManager                ← 配置读写：DPAPI 加密存储
-NetworkInterfaceHelper       ← 网卡操作：获取 IP/MAC/SSID，WiFi 重连
-RedirectUrlParser            ← 工具类（静态）：解析 AC 重定向 URL
-AuthenticationClient         ← 编排类：整合以上所有类，执行完整登录流程
-```
+v1.9.0 重写了整个脚本，从"硬编码 + 类"改为"读 JSON 配置 + 函数式"：
+- 移除 `NetworkConfig` / `DomainConfig` / `ConfigManager` / `RedirectUrlParser` / `AuthenticationClient` 5 个类
+- 移除交互式 `Read-Host` 输入账号密码
+- 移除自动检测 portal 重定向（`TryAutoDetectParams`）和手动粘贴 URL 引导
+- 改为 `Load-LoginProfile` + `Get-LoginPassword` + `Invoke-CampusLogin` 三个核心函数
+- 配置来源：`%APPDATA%/xxgcxy-wifi/login_profile.json` + `login_credential.bin`
 
-#### 5.3.2 参数自动检测（两级回退）
+#### 5.3.2 主流程
 
 ```
-方法 ① GET http://www.qq.com (MaximumRedirection=0)
-         └─ 捕获 302 → 解析 Location 头 URL → 提取全部参数
-         └─ 失败 → 方法 ②
-
-方法 ② GET http://172.18.252.12:6060 (MaximumRedirection=0)
-         └─ 捕获 302 → 解析 URL → 用系统查询的 IP/MAC 补全缺失字段
-         └─ 失败 → 方法 ③
-
-方法 ③ 提示用户手动在浏览器复制 Portal URL 后粘贴
+Load-LoginProfile       读取 login_profile.json
+        ↓
+Get-LoginPassword       从 login_credential.bin 解密 (DPAPI, CurrentUser scope)
+        ↓
+Invoke-CampusLogin      构造 quickauth.do URL → Invoke-WebRequest → 判断响应
+        ↓
+exit $code              --non-interactive 模式直接退出,交互模式 Read-Host 暂停
 ```
 
-核心技术细节：
-- `-MaximumRedirection 0` 阻止 PowerShell 自动跟随重定向，这样才能拿到 302 的 Location 头
-- `-Proxy $null` 避免系统代理干扰
-- 虚拟机网卡过滤：`InterfaceDescription` 匹配 `Wi-Fi|Wireless|WLAN`，排除 `Virtual/VMware/Hyper-V/VirtualBox`
+#### 5.3.3 配置读取
 
-#### 5.3.3 认证请求构造
+`Load-LoginProfile` 必需字段：
+- `user_id` —— "学号@xxgcyd/xxgclt/xxgcdx"
+- `operator` —— "yd" / "lt" / "dx"
+- `base_url` —— 完整 portal.do URL
+- `vlan` —— VLAN ID
+- `mac_address` —— MAC 地址(留空时 PS 端运行时取)
+
+`wlan_user_ip` 是可选的,运行时由 `Get-WifiIpAddress()` 自动获取。
+
+#### 5.3.4 认证请求构造
 
 ```
-目标端点：{BaseURL}/quickauth.do  （注意是 quickauth.do，不是 portal.do）
+目标端点：{BaseURL → /quickauth.do}  (regex: /\w+\.do → /quickauth.do)
 请求方法：GET
-参数传递：Query String（约15个参数，全部 URL 编码）
-
-参数分类：
-  - 用户凭证：userid, passwd
-  - 设备信息：wlanuserip, mac, vlan, hostname
-  - AC 固定参数：wlanacname, wlanacIp, portalpageid, portaltype, version, bindCtrlId
-  - 唯一性参数：uuid (GUID v4), timestamp (毫秒级)
+参数传递：Query String（约15个参数）
 ```
 
-#### 5.3.4 密码加密存储
+- `-Proxy $null` 必须,避免系统代理干扰
+- `-UseBasicParsing` 提高 PS 5 兼容性
+- `-TimeoutSec 15` 防止卡死
+
+#### 5.3.5 密码解密 (DPAPI)
 
 ```
-写入：Read-Host -AsSecureString → ConvertFrom-SecureString (DPAPI) → Base64 → JSON
-读取：JSON Base64 → ConvertTo-SecureString (DPAPI) → SecureStringToBSTR → 使用后 FreeBSTR
+文件格式: [b"DPAPI" 4字节 magic] [u32 LE 长度] [CryptProtectData 输出]
+加密端: Rust 端 CryptProtectData (无 entropy, dwFlags=0, CurrentUser scope)
+解密端: .NET ProtectedData.Unprotect(protected, $null, CurrentUser)
 ```
 
-- 配置文件路径：`$env:APPDATA/xxgc_campus_net_config.txt`
-- 文件属性设为 Hidden
-- 密码仅在使用时短暂存在于内存，用完立即 `FreeBSTR` 释放
+- 仅 Windows 同用户可解密（DPAPI master key 与用户绑定）
+- 密码仅在使用时短暂存在于内存（普通 String,无 SecureString）
+- Linux 平台暂用明文（后续可换 libsecret / keyring）
 
-#### 5.3.5 认证结果判断
+#### 5.3.6 认证结果判断
 
 | 响应特征 | 判断 |
 |----------|------|
-| `"code":0` / `success` / `认证成功` | 通过 |
-| `"code":1` / `账号不存在` | 失败：账号不存在 |
-| `"code":44` / `非法接入` | 失败：非法接入（VLAN/MAC 不匹配） |
-| 其他 | 未知 |
+| `"code":0` / `success` / `认证成功` | 通过 (exit 0) |
+| `"code":1` / `账号不存在` | 失败：账号不存在 (exit 1) |
+| `"code":44` / `非法接入` | 失败：非法接入 (exit 44) |
+| 其他 | 未知 (exit 99) |
 
 ---
 
@@ -649,7 +705,17 @@ AC → 放行该 IP/MAC → 客户端可以上网
 ---
 ## 9. 版本历史
 
-- **v1.8.3**：当前版本。修复校园网配置读取路径(同时支持 xywdl.ps1 的 APPDATA 路径与 xywdl.sh 的 `~/.config/xxgcxy-wifi/login_config.json` 路径),Windows 上 Git Bash 用户也能识别;xywdl.bat 顶部加 `chcp 65001 >nul` 切换到 UTF-8 代码页,xywdl.bat / xywdl.ps1 加 UTF-8 BOM 兼容 PowerShell 5。
+- **v1.9.0**：登录模块彻底解耦。重大变更：
+  - **登录配置从硬编码改为 JSON 模板 + 渲染器模式**。`%APPDATA%/xxgcxy-wifi/login_profile.json` 存元数据(学号/运营商/SSID/Portal URL/AC/VLAN/MAC 等),`login_credential.bin` 存 DPAPI 加密的密码。
+  - **xywdl.ps1 大幅简化**:从 604 行的 6 个类改为 ~280 行的函数式脚本,移除交互式 Read-Host、移除自动检测 portal 重定向(`TryAutoDetectParams`)、移除手动粘贴 URL 引导。
+  - **新增登录配置屏**(`#loginConfigScreen`):运营商下拉 + 学号 + 密码 + Portal URL(带解析按钮)+ 高级字段折叠(SSID/AC/VLAN/MAC/主机名)。首次启动强制弹窗,提供"稍后"按钮可跳过。
+  - **主页 + 网络配置页加入口按钮**:主页"登录（更换）校园网账号"、网络配置页"更改账号信息"。
+  - **新增 6 个 Tauri 命令**:`is_login_configured` / `get_login_profile` / `save_login_profile` / `clear_login_profile` / `parse_portal_url` / `run_login_with_profile`。
+  - **DPAPI 跨进程密码保护**:Rust 端用 `CryptProtectData` 加密 UTF-16 字节(无 entropy),PS 端用 `ProtectedData.Unprotect($null, CurrentUser)` 解密。文件格式 `b"DPAPI" + u32 长度 + 密文`。
+  - **不兼容旧的 `xxgc_campus_net_config.txt`**,首次启动会引导用户重新配置;`clear_campus_net_info` 同时清理新旧文件。
+  - 版本号升至 1.9.0(package.json / Cargo.toml / tauri.conf.json)。
+
+- **v1.8.3**：修复校园网配置读取路径(同时支持 xywdl.ps1 的 APPDATA 路径与 xywdl.sh 的 `~/.config/xxgcxy-wifi/login_config.json` 路径),Windows 上 Git Bash 用户也能识别;xywdl.bat 顶部加 `chcp 65001 >nul` 切换到 UTF-8 代码页,xywdl.bat / xywdl.ps1 加 UTF-8 BOM 兼容 PowerShell 5。
 - **v1.8.2**：在"网络配置"窗口展示校园网信息(学号/运营商),并提供"清理校园网信息"按钮一键删除登录配置。新增 Tauri 命令 `load_campus_net_info` / `clear_campus_net_info`,后端从 `%APPDATA%/xxgc_campus_net_config.txt` 读取 `UserId` 字段并按 `@` 拆分为学号 + 运营商后缀(移动/联通/电信)。
 - **v1.8.1**：修复 bat 引号崩溃、重排托盘菜单、手动连接改为仅连 WiFi、执行登录脚本改为直接运行、Linux 缺少 --non-interactive 修复、清理代码警告、完善技术文档。
 - **v1.7.11**：内置 PS7 支持、NSIS 安装器、跨平台构建、`_pw7_` 资源路径修正、便携构建验证步骤优化。

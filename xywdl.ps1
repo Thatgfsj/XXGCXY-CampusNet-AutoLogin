@@ -1,603 +1,323 @@
-﻿class NetworkConfig {
-    [string] $BaseURL
-    [string] $WlanAcName
-    [string] $WlanAcIp
-    [string] $Ssid
-    [string] $Version
-    [string] $PortalPageId
-    [string] $PortalType
-    [string] $Hostname
-    [string] $BindCtrlId
-    [int]    $TimeoutSec
-    [string] $UserId
-    [SecureString] $Passwd
-    [string] $Vlan
-    [string] $WlanUserIp
-    [string] $MacAddress
-    [string] $Rand
+###############################################################################
+#  新乡工程学院校园网登录脚本 (v1.9.0+)
+#
+#  与旧版的区别 (v1.8.x 兼容层已移除):
+#    1. 不再交互式读 Read-Host 取账号/密码
+#    2. 不再自动检测 portal 重定向
+#    3. 配置全部从 JSON 模板读取: %APPDATA%/xxgcxy-wifi/login_profile.json
+#    4. 密码从 DPAPI 加密的 .bin 读取,本脚本自动解密
+#    5. 运营商由 profile.operator 字段决定 (yd/lt/dx)
+#
+#  兼容:
+#    - pwsh 7.x  (推荐)
+#    - powershell 5.1  (Windows PS 5,UTF-8 BOM 读取时已确认可用)
+###############################################################################
 
-    [int] $SuccessCode = 0
-    [int] $UserNotFoundCode = 1
-    [int] $IllegalAccessCode = 44
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+chcp 65001 | Out-Null
 
-    NetworkConfig() {
-        $this.BaseURL = ""
-        $this.WlanAcName = ""
-        $this.WlanAcIp = ""
-        $this.Ssid = ""
-        $this.Version = "0"
-        $this.PortalPageId = "3"
-        $this.PortalType = "0"
-        $this.Hostname = $env:COMPUTERNAME
-        $this.BindCtrlId = ""
-        $this.TimeoutSec = 30
-        $this.UserId = ""
-        $this.Passwd = $null
-        $this.Vlan = ""
-        $this.WlanUserIp = ""
-        $this.MacAddress = ""
-        $this.Rand = ""
+# ============= 路径 =============
+
+$AppDataDir = Join-Path $env:APPDATA "xxgcxy-wifi"
+$ProfilePath = Join-Path $AppDataDir "login_profile.json"
+$CredPath = Join-Path $AppDataDir "login_credential.bin"
+
+# ============= 工具函数 =============
+
+function Get-LoginDir {
+    if (-not (Test-Path $AppDataDir)) {
+        New-Item -ItemType Directory -Path $AppDataDir -Force | Out-Null
+    }
+    return $AppDataDir
+}
+
+function Get-OperatorName {
+    param([string]$code)
+    switch ($code) {
+        "yd" { return "移动" }
+        "lt" { return "联通" }
+        "dx" { return "电信" }
+        default { return "未知" }
     }
 }
 
-class DomainConfig {
-    static [hashtable] GetDomainOptions() {
-        return @{
-            "1" = "@xxgcyd"
-            "2" = "@xxgclt"
-            "3" = "@xxgcdx"
-        }
-    }
-
-    static [string] GetDomainName([string]$suffix) {
-        if ($suffix -eq "@xxgcyd") { return "移动" }
-        if ($suffix -eq "@xxgclt") { return "联通" }
-        if ($suffix -eq "@xxgcdx") { return "电信" }
-        return "未知"
+function Get-OperatorSuffix {
+    param([string]$code)
+    switch ($code) {
+        "yd" { return "@xxgcyd" }
+        "lt" { return "@xxgclt" }
+        "dx" { return "@xxgcdx" }
+        default { return "" }
     }
 }
 
-class ConfigManager {
-    [string] $ConfigFilePath
+# ============= LoginProfile 读取 =============
 
-    ConfigManager([string]$path) {
-        $this.ConfigFilePath = $path
-    }
-
-    [hashtable] LoadConfig() {
-        if (-not (Test-Path $this.ConfigFilePath)) { return $null }
-        try {
-            $content = Get-Content -Path $this.ConfigFilePath -Raw -ErrorAction Stop
-            if ([string]::IsNullOrWhiteSpace($content)) { return $null }
-            $config = ConvertFrom-Json $content -ErrorAction Stop
-
-            $requiredFields = @("BaseURL", "WlanAcName", "WlanUserIp", "MacAddress", "Vlan")
-            foreach ($field in $requiredFields) {
-                if (-not $config.PSObject.Properties.Name.Contains($field)) {
-                    return $null
-                }
-            }
-
-            $password = ""
-            if ($config.PSObject.Properties.Name.Contains('EncryptedPassword')) {
-                $secureString = ConvertTo-SecureString -String $config.EncryptedPassword -ErrorAction Stop
-                $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureString)
-                $password = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-                [Runtime.InteropServices.Marshal]::FreeBSTR($bstr)
-            }
-
-            return @{
-                BaseURL = $config.BaseURL
-                WlanAcName = $config.WlanAcName
-                WlanAcIp = if ($config.PSObject.Properties.Name.Contains('WlanAcIp')) { $config.WlanAcIp } else { "" }
-                Ssid = if ($config.PSObject.Properties.Name.Contains('Ssid')) { $config.Ssid } else { "" }
-                Version = if ($config.PSObject.Properties.Name.Contains('Version')) { $config.Version } else { "0" }
-                PortalPageId = if ($config.PSObject.Properties.Name.Contains('PortalPageId')) { $config.PortalPageId } else { "3" }
-                PortalType = if ($config.PSObject.Properties.Name.Contains('PortalType')) { $config.PortalType } else { "0" }
-                Hostname = if ($config.PSObject.Properties.Name.Contains('Hostname')) { $config.Hostname } else { $env:COMPUTERNAME }
-                BindCtrlId = if ($config.PSObject.Properties.Name.Contains('BindCtrlId')) { $config.BindCtrlId } else { "" }
-                UserId = if ($config.PSObject.Properties.Name.Contains('UserId')) { $config.UserId } else { "" }
-                Password = $password
-                Vlan = $config.Vlan
-                WlanUserIp = $config.WlanUserIp
-                MacAddress = $config.MacAddress
-                Rand = if ($config.PSObject.Properties.Name.Contains('Rand')) { $config.Rand } else { "" }
-            }
-        }
-        catch {
-            Write-Host "读取配置文件失败: $($_.Exception.Message)" -ForegroundColor Yellow
-            return $null
-        }
-    }
-
-    [void] SaveConfig([NetworkConfig]$config, [string]$password) {
-        try {
-            $securePassword = ConvertTo-SecureString -String $password -AsPlainText -Force
-            $encryptedPassword = ConvertFrom-SecureString -SecureString $securePassword
-
-            $configObject = [PSCustomObject]@{
-                BaseURL = $config.BaseURL
-                WlanAcName = $config.WlanAcName
-                WlanAcIp = $config.WlanAcIp
-                Ssid = $config.Ssid
-                Version = $config.Version
-                PortalPageId = $config.PortalPageId
-                PortalType = $config.PortalType
-                Hostname = $config.Hostname
-                BindCtrlId = $config.BindCtrlId
-                UserId = $config.UserId
-                EncryptedPassword = $encryptedPassword
-                Vlan = $config.Vlan
-                WlanUserIp = $config.WlanUserIp
-                MacAddress = $config.MacAddress
-                Rand = $config.Rand
-            }
-
-            $dir = Split-Path $this.ConfigFilePath -Parent
-            if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-
-            $json = $configObject | ConvertTo-Json -Compress
-            Set-Content -Path $this.ConfigFilePath -Value $json -Encoding UTF8 -NoNewline
-            (Get-Item $this.ConfigFilePath).Attributes = [System.IO.FileAttributes]::Hidden
-
-            Write-Host "配置已保存到: $this.ConfigFilePath" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "保存配置失败: $($_.Exception.Message)" -ForegroundColor Red
-        }
-    }
-}
-
-class NetworkInterfaceHelper {
-    [string] GetWirelessMacAddress() {
-        try {
-            $ad = Get-NetAdapter | Where-Object {
-                ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
-                $_.Status -eq 'Up' -and
-                $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
-            } | Select-Object -First 1
-            if ($ad) {
-                $mac = ($ad.MacAddress -replace '[-:]', ':').ToLower()
-                if ($mac -notmatch '^([0-9a-f]{2}:){5}[0-9a-f]{2}$') {
-                    $mac = ($ad.MacAddress -replace '[-.]', ':').ToLower()
-                }
-                return $mac
-            }
-        } catch {}
+function Load-LoginProfile {
+    $dir = Get-LoginDir
+    if (-not (Test-Path $ProfilePath)) {
+        Write-Host "[!] 未找到登录配置: $ProfilePath" -ForegroundColor Red
+        Write-Host "    请先在 UI 主页或网络配置页填写校园网账号信息。" -ForegroundColor Yellow
         return $null
     }
-
-    [string] GetWifiIpAddress() {
-        try {
-            $ad = Get-NetAdapter | Where-Object {
-                ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
-                $_.Status -eq 'Up' -and
-                $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
-            } | Select-Object -First 1
-            if ($ad) {
-                $ip = Get-NetIPAddress -InterfaceIndex $ad.IfIndex -AddressFamily IPv4 -ErrorAction Stop
-                return $ip.IPAddress
-            }
-        } catch {}
+    if (-not (Test-Path $CredPath)) {
+        Write-Host "[!] 未找到加密密码文件: $CredPath" -ForegroundColor Red
+        Write-Host "    请重新在 UI 中保存配置。" -ForegroundColor Yellow
         return $null
     }
+    try {
+        $content = Get-Content -Path $ProfilePath -Raw -Encoding UTF8 -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($content)) { return $null }
+        $json = $content | ConvertFrom-Json -ErrorAction Stop
 
-    [string] GetCurrentSsid() {
-        try {
-            $wifi = netsh wlan show interfaces | Out-String
-            if ($wifi -match 'SSID\s*:\s*(.+)') {
-                return $matches[1].Trim()
-            }
-        } catch {}
-        return $null
-    }
-
-    [bool] IsConfiguredSsidConnected([string]$targetSsid) {
-        if ([string]::IsNullOrEmpty($targetSsid)) { return $true }
-        $currentSsid = $this.GetCurrentSsid()
-        if ($currentSsid -eq $targetSsid) {
-            $adapter = Get-NetAdapter | Where-Object {
-                ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
-                $_.Status -eq 'Up' -and
-                $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
-            } | Select-Object -First 1
-            return ($null -ne $adapter)
-        }
-        return $false
-    }
-
-    [void] ReconnectToSsid([string]$targetSsid) {
-        if ([string]::IsNullOrEmpty($targetSsid)) { return }
-        Write-Host "当前已断开配置WiFi ($targetSsid)，正在尝试重连..." -ForegroundColor Yellow
-        try {
-            $profiles = netsh wlan show profiles | Out-String
-            if ($profiles -notmatch $targetSsid) {
-                Write-Host "未找到已保存的WiFi配置: $targetSsid" -ForegroundColor Red
-                return
-            }
-            netsh wlan disconnect | Out-Null
-            Start-Sleep -Milliseconds 500
-            netsh wlan connect name="$targetSsid" | Out-Null
-            Write-Host "正在连接 $targetSsid ..." -ForegroundColor Cyan
-            $maxWait = 15
-            for ($i = 0; $i -lt $maxWait; $i++) {
-                Start-Sleep -Seconds 1
-                if ($this.IsConfiguredSsidConnected($targetSsid)) {
-                    Write-Host "WiFi 重连成功！" -ForegroundColor Green
-                    return
-                }
-            }
-            Write-Host "WiFi 重连超时" -ForegroundColor Red
-        } catch {
-            Write-Host "WiFi 重连失败: $($_.Exception.Message)" -ForegroundColor Red
-        }
-    }
-}
-
-class RedirectUrlParser {
-    static [hashtable] ParseRedirectUrl([string]$url) {
-        $result = @{}
-
-        try {
-            $decodedUrl = [Uri]::UnescapeDataString($url)
-
-            if ($decodedUrl -match '^(http://[^/]+(/\w+\.do))') {
-                $result['BaseURL'] = $matches[1]
-            }
-
-            if ($decodedUrl -match '\?(.*)$') {
-                $queryString = $matches[1]
-                $params = $queryString -split '&'
-
-                foreach ($param in $params) {
-                    $kv = $param -split '=', 2
-                    if ($kv.Length -eq 2) {
-                        $key = $kv[0]
-                        $value = [Uri]::UnescapeDataString($kv[1])
-
-                        switch ($key) {
-                            "wlanuserip" { $result['WlanUserIp'] = $value }
-                            "wlanacname" { $result['WlanAcName'] = $value }
-                            "wlanacIp" { $result['WlanAcIp'] = $value }
-                            "mac" { $result['MacAddress'] = $value.ToLower() }
-                            "vlan" { $result['Vlan'] = $value }
-                            "hostname" { $result['Hostname'] = $value }
-                            "rand" { $result['Rand'] = $value }
-                            "url" { $result['Url'] = $value }
-                        }
-                    }
-                }
-            }
-
-            return $result
-        }
-        catch {
-            Write-Host "解析URL失败: $($_.Exception.Message)" -ForegroundColor Red
-            return $null
-        }
-    }
-}
-
-class AuthenticationClient {
-    [NetworkConfig] $Config
-    [ConfigManager] $ConfigMgr
-    [NetworkInterfaceHelper] $NetworkHelper
-    [bool] $IsAutoDetected
-    [bool] $NonInteractive
-
-    AuthenticationClient([NetworkConfig]$c, [ConfigManager]$cm, [NetworkInterfaceHelper]$nh) {
-        $this.Config = $c
-        $this.ConfigMgr = $cm
-        $this.NetworkHelper = $nh
-        $this.IsAutoDetected = $false
-        $this.NonInteractive = $false
-    }
-
-    [void] Run([bool]$nonInteractive) {
-        $this.NonInteractive = $nonInteractive
-
-        Write-Host "`n===== 新乡工程学院校园网登录脚本 =====" -ForegroundColor Cyan
-        $savedConfig = $this.ConfigMgr.LoadConfig()
-        if ($savedConfig) {
-            Write-Host "`n已找到保存的配置，自动登录中..." -ForegroundColor Cyan
-            $this.ApplyConfig($savedConfig)
-            if (-not [string]::IsNullOrEmpty($savedConfig['Password'])) {
-                $this.Config.Passwd = ConvertTo-SecureString $savedConfig['Password'] -AsPlainText -Force
-            }
-            if (-not $this.NetworkHelper.IsConfiguredSsidConnected($this.Config.Ssid)) {
-                $this.NetworkHelper.ReconnectToSsid($this.Config.Ssid)
-            }
-            $this.PerformAuthentication()
-            return
-        }
-
-        Write-Host "`n=== 步骤1：自动获取登录参数 ===" -ForegroundColor Yellow
-        Write-Host "正在尝试通过重定向获取登录信息..." -ForegroundColor White
-
-        $autoParams = $this.TryAutoDetectParams()
-        if ($autoParams) {
-            $this.ApplyConfig($autoParams)
-            $this.IsAutoDetected = $true
-            Write-Host "自动获取成功！" -ForegroundColor Green
-            $this.DisplayNetworkInfo()
-        } else {
-            if ($this.NonInteractive) {
-                Write-Host "自动获取参数失败，非交互模式下无法手动输入，退出" -ForegroundColor Red
-                exit 1
-            }
-            Write-Host "`n请按以下步骤操作：" -ForegroundColor White
-            Write-Host "1. 连接校园网（如果已经登录登录2.2.2.2来退出）" -ForegroundColor Gray
-            Write-Host "2. 打开浏览器访问任意网站（如 www.qq.com）" -ForegroundColor Gray
-            Write-Host "3. 浏览器会自动重定向到登录页面" -ForegroundColor Gray
-            Write-Host "4. 复制浏览器地址栏中的完整URL地址（例：172.xxxxxxxx这个网站链接）" -ForegroundColor Gray
-            Write-Host "5. 将URL粘贴到下面" -ForegroundColor Gray
-
-            $manualUrl = Read-Host "`n请粘贴校园网登录链接："
-            while ([string]::IsNullOrWhiteSpace($manualUrl) -or $manualUrl -notmatch '^http://' -or $manualUrl -notmatch '/portal\.do') {
-                Write-Host "URL格式不正确，请输入包含 /portal.do 的重定向URL" -ForegroundColor Red
-                $manualUrl = Read-Host "请重新粘贴重定向URL"
-            }
-
-            $manualParams = [RedirectUrlParser]::ParseRedirectUrl($manualUrl)
-            if ($manualParams -and $manualParams['WlanUserIp']) {
-                $this.ApplyConfig($manualParams)
-                Write-Host "URL解析成功！" -ForegroundColor Green
-                $this.DisplayNetworkInfo()
-            } else {
-                Write-Host "URL解析失败，请检查URL是否完整" -ForegroundColor Red
-                if (-not $this.NonInteractive) {
-                    Read-Host "按Enter退出"
-                }
-                exit 1
-            }
-        }
-
-        if ($this.NonInteractive) {
-            Write-Host "非交互模式，跳过账号输入，无法完成配置" -ForegroundColor Red
-            exit 1
-        }
-
-        $this.PromptForCredentials()
-
-        Write-Host "`n=== 是否保存配置？ ===" -ForegroundColor Yellow
-        $save = Read-Host "保存后下次无需重新输入 (y/N)"
-        if ($save -eq 'y' -or $save -eq 'Y') {
-            $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($this.Config.Passwd)
-            $plainPwd = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)
-            [Runtime.InteropServices.Marshal]::FreeBSTR($b)
-
-            $this.ConfigMgr.SaveConfig($this.Config, $plainPwd)
-        }
-
-        $this.PerformAuthentication()
-    }
-
-    [hashtable] TryAutoDetectParams() {
-        $response = $null
-
-        try {
-            Write-Host "方法1: 尝试访问 www.qq.com 捕获重定向..." -ForegroundColor Gray
-
-            try {
-                $response = Invoke-WebRequest -Uri "http://www.qq.com" -MaximumRedirection 0 -ErrorAction SilentlyContinue -Proxy $null
-            }
-            catch {
-                $response = $null
-            }
-
-            if ($response -and $response.Headers["Location"]) {
-                $redirectUrl = $response.Headers["Location"]
-                Write-Host "捕获到重定向: $redirectUrl" -ForegroundColor Gray
-                return [RedirectUrlParser]::ParseRedirectUrl($redirectUrl)
-            }
-        }
-        catch {
-            Write-Host "方法1失败: $($_.Exception.Message)" -ForegroundColor Gray
-        }
-
-        try {
-            Write-Host "方法2: 尝试直接访问校园网portal..." -ForegroundColor Gray
-
-            $localIp = $this.NetworkHelper.GetWifiIpAddress()
-            $localMac = $this.NetworkHelper.GetWirelessMacAddress()
-
-            if (-not $localIp) {
-                Write-Host "无法获取本地IP，请确保已连接Wi-Fi" -ForegroundColor Red
+        $required = @("user_id", "operator", "base_url", "vlan", "mac_address")
+        # wlan_user_ip 是可选的,运行时由 Get-WifiIpAddress() 自动取本地 IP 兜底
+        foreach ($f in $required) {
+            if (-not $json.PSObject.Properties.Name.Contains($f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
+                Write-Host "[!] 登录配置缺少字段: $f" -ForegroundColor Red
                 return $null
             }
-
-            $response = $null
-            try {
-                $response = Invoke-WebRequest -Uri "http://172.18.252.12:6060" -MaximumRedirection 0 -TimeoutSec 10 -ErrorAction SilentlyContinue -Proxy $null
-            }
-            catch {
-                $response = $null
-            }
-
-            if ($response -and $response.Headers["Location"]) {
-                $redirectUrl = $response.Headers["Location"]
-                Write-Host "捕获到重定向: $redirectUrl" -ForegroundColor Gray
-
-                $params = [RedirectUrlParser]::ParseRedirectUrl($redirectUrl)
-                if ($params) {
-                    if (-not $params['WlanUserIp']) { $params['WlanUserIp'] = $localIp }
-                    if (-not $params['MacAddress']) { $params['MacAddress'] = $localMac }
-                    return $params
-                }
-            }
         }
-        catch {
-            Write-Host "方法2失败: $($_.Exception.Message)" -ForegroundColor Gray
-        }
-
+        return $json
+    } catch {
+        Write-Host "[!] 读取登录配置失败: $($_.Exception.Message)" -ForegroundColor Red
         return $null
     }
+}
 
-    [void] ApplyConfig([hashtable]$params) {
-        if ($params['BaseURL']) { $this.Config.BaseURL = $params['BaseURL'] }
-        if ($params['WlanAcName']) { $this.Config.WlanAcName = $params['WlanAcName'] }
-        if ($params['WlanAcIp']) { $this.Config.WlanAcIp = $params['WlanAcIp'] }
-        if ($params['Ssid']) { $this.Config.Ssid = $params['Ssid'] }
-        if ($params['Version']) { $this.Config.Version = $params['Version'] }
-        if ($params['PortalPageId']) { $this.Config.PortalPageId = $params['PortalPageId'] }
-        if ($params['PortalType']) { $this.Config.PortalType = $params['PortalType'] }
-        if ($params['Hostname']) { $this.Config.Hostname = $params['Hostname'] }
-        if ($params['BindCtrlId']) { $this.Config.BindCtrlId = $params['BindCtrlId'] }
-        if ($params['UserId']) { $this.Config.UserId = $params['UserId'] }
-        if ($params['Vlan']) { $this.Config.Vlan = $params['Vlan'] }
-        if ($params['WlanUserIp']) { $this.Config.WlanUserIp = $params['WlanUserIp'] }
-        if ($params['MacAddress']) { $this.Config.MacAddress = $params['MacAddress'] }
-        if ($params['Rand']) { $this.Config.Rand = $params['Rand'] }
+# ============= 密码解密 =============
 
-        $localIp = $this.NetworkHelper.GetWifiIpAddress()
-        $localMac = $this.NetworkHelper.GetWirelessMacAddress()
-        if ($localIp) { $this.Config.WlanUserIp = $localIp }
-        if ($localMac) { $this.Config.MacAddress = $localMac }
+function Get-LoginPassword {
+    try {
+        # 加载 .NET ProtectedData (Windows 专属,System.Security.Cryptography.ProtectedData 在 System.Security.dll)
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+    } catch {
+        Write-Host "[!] 加载 System.Security 程序集失败: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
     }
-
-    [void] DisplayNetworkInfo() {
-        Write-Host "`n--- 当前网络信息 ---" -ForegroundColor Cyan
-        Write-Host "  认证地址: $($this.Config.BaseURL)" -ForegroundColor White
-        Write-Host "  AC名称:   $($this.Config.WlanAcName)" -ForegroundColor White
-        Write-Host "  用户IP:  $($this.Config.WlanUserIp)" -ForegroundColor White
-        Write-Host "  MAC地址: $($this.Config.MacAddress)" -ForegroundColor White
-        Write-Host "  VLAN:    $($this.Config.Vlan)" -ForegroundColor White
-        Write-Host "  主机名:  $($this.Config.Hostname)" -ForegroundColor White
-    }
-
-    [void] PromptForCredentials() {
-        Write-Host "`n=== 步骤2：输入账号信息 ===" -ForegroundColor Yellow
-
-        Write-Host "请选择运营商:" -ForegroundColor White
-        $opt = [DomainConfig]::GetDomainOptions()
-        foreach ($k in $opt.Keys | Sort-Object) {
-            $name = [DomainConfig]::GetDomainName($opt[$k])
-            Write-Host "  $k. $name ($($opt[$k]))"
+    try {
+        # 文件格式:"DPAPI" magic (4 字节) + 长度 (4 字节 LE) + 加密数据
+        $bytes = [System.IO.File]::ReadAllBytes($CredPath)
+        if ($bytes.Length -lt 8) {
+            throw "credential 文件过短 ($($bytes.Length) 字节)"
         }
-
-        $v = ""
-        do {
-            $v = Read-Host "请输入对应数字 (1/2/3)"
-        } while ($opt.Keys -notcontains $v)
-        $choice = $v
-
-        $suffix = $opt[$choice]
-        $operatorName = [DomainConfig]::GetDomainName($suffix)
-
-        $id = Read-Host "请输入学号（纯数字）"
-        while ($id -notmatch '^\d+$' -or [string]::IsNullOrWhiteSpace($id)) {
-            Write-Host "学号必须是纯数字！" -ForegroundColor Red
-            $id = Read-Host "请重新输入学号"
+        $magic = [System.Text.Encoding]::ASCII.GetString($bytes[0..3])
+        if ($magic -ne "DPAPI") {
+            throw "credential magic 错误,期望 DPAPI,得到 '$magic'"
         }
-
-        $this.Config.UserId = $id + $suffix
-        Write-Host "完整账号: $($this.Config.UserId) ($operatorName)" -ForegroundColor Cyan
-
-        do {
-            $p1 = Read-Host "请输入校园网密码" -AsSecureString
-            $p2 = Read-Host "请再次输入密码确认" -AsSecureString
-
-            $b1 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p1)
-            $s1 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b1)
-            [Runtime.InteropServices.Marshal]::FreeBSTR($b1)
-
-            $b2 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($p2)
-            $s2 = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b2)
-            [Runtime.InteropServices.Marshal]::FreeBSTR($b2)
-
-            if ($s1 -eq $s2 -and -not [string]::IsNullOrWhiteSpace($s1)) {
-                $this.Config.Passwd = $p1
-                break
-            } elseif ([string]::IsNullOrWhiteSpace($s1)) {
-                Write-Host "密码不能为空！" -ForegroundColor Red
-            } else {
-                Write-Host "两次输入的密码不一致！" -ForegroundColor Red
-            }
-        } while ($true)
-    }
-
-    [void] PerformAuthentication() {
-        Write-Host "`n=== 步骤3：开始认证 ===" -ForegroundColor Yellow
-        if (-not $this.NetworkHelper.IsConfiguredSsidConnected($this.Config.Ssid)) {
-            $this.NetworkHelper.ReconnectToSsid($this.Config.Ssid)
+        $len = [BitConverter]::ToInt32($bytes, 4)
+        if ($len -le 0 -or $len -gt ($bytes.Length - 8)) {
+            throw "credential 长度异常: $len (文件总长 $($bytes.Length))"
         }
-        Write-Host "MAC地址: $($this.Config.MacAddress)" -ForegroundColor Gray
+        $protected = $bytes[8..(7 + $len)]
 
-        $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($this.Config.Passwd)
-        $plainPwd = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)
-
-        try {
-            $uuid = [guid]::NewGuid().ToString()
-            $timestamp = [int](Get-Date -UFormat %s) * 1000
-
-            $authUrl = $this.Config.BaseURL -replace '/\w+\.do', '/quickauth.do'
-
-            $queryParams = @(
-                "userid=$([Uri]::EscapeDataString($this.Config.UserId))",
-                "passwd=$([Uri]::EscapeDataString($plainPwd))",
-                "wlanuserip=$($this.Config.WlanUserIp)",
-                "wlanacname=$([Uri]::EscapeDataString($this.Config.WlanAcName))",
-                "wlanacIp=$($this.Config.WlanAcIp)",
-                "ssid=$($this.Config.Ssid)",
-                "vlan=$($this.Config.Vlan)",
-                "mac=$($this.Config.MacAddress)",
-                "version=$($this.Config.Version)",
-                "portalpageid=$($this.Config.PortalPageId)",
-                "timestamp=$timestamp",
-                "uuid=$uuid",
-                "portaltype=$($this.Config.PortalType)",
-                "hostname=$([Uri]::EscapeDataString($this.Config.Hostname))",
-                "bindCtrlId=$($this.Config.BindCtrlId)"
-            ) -join "&"
-
-            $requestUrl = $authUrl + "?" + $queryParams
-            Write-Host "请求地址: $requestUrl" -ForegroundColor Gray
-
-            $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop -Proxy $null
-
-            Write-Host "`n=== 认证响应 ===" -ForegroundColor Cyan
-            Write-Host "HTTP状态码: $($response.StatusCode)" -ForegroundColor Green
-            Write-Host "响应内容: $($response.Content)" -ForegroundColor White
-
-            if ($response.Content -match '"code"\s*:\s*0' -or $response.Content -match "success" -or $response.Content -match "认证成功") {
-                Write-Host "`n认证成功！您已连接到互联网。" -ForegroundColor Green
-                Write-Host "账号: $($this.Config.UserId)" -ForegroundColor Cyan
-                exit 0
-            } elseif ($response.Content -match '"code"\s*:\s*1' -or $response.Content -match "账号不存在") {
-                Write-Host "`n认证失败：账号不存在，请检查学号和运营商是否正确" -ForegroundColor Red
-            } elseif ($response.Content -match '"code"\s*:\s*44' -or $response.Content -match "非法接入") {
-                Write-Host "`n认证失败：非法接入，请检查VLAN ID或MAC地址是否正确" -ForegroundColor Red
-            } else {
-                Write-Host "`n认证结果未知，请检查账号密码是否正确" -ForegroundColor Yellow
-                Write-Host "响应: $($response.Content)" -ForegroundColor Gray
-            }
-        }
-        catch {
-            Write-Host "`n认证请求发送失败！" -ForegroundColor Red
-            Write-Host "错误信息: $($_.Exception.Message)" -ForegroundColor DarkGray
-        }
-        finally {
-            if ($b) { [Runtime.InteropServices.Marshal]::FreeBSTR($b) }
-        }
-
-        if ($args -notcontains '--non-interactive') {
-            if (-not $this.NonInteractive) {
-            Read-Host "`n按 Enter 键退出脚本" | Out-Null
-        }
-        }
+        # DPAPI 解密 (无 entropy, 走 CurrentUser scope)
+        $plain = [System.Security.Cryptography.ProtectedData]::Unprotect(
+            $protected,
+            $null,
+            [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+        )
+        # 解出的是 UTF-16 LE 字节,还原成字符串
+        $text = [System.Text.Encoding]::Unicode.GetString($plain)
+        # 去掉尾部 NUL (Rust 端可能没加,但防御性去掉)
+        return $text.TrimEnd("`0")
+    } catch {
+        Write-Host "[!] 解密密码失败: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
     }
 }
+
+# ============= 网络接口 =============
+
+function Get-WirelessMacAddress {
+    try {
+        $ad = Get-NetAdapter | Where-Object {
+            ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
+            $_.Status -eq 'Up' -and
+            $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
+        } | Select-Object -First 1
+        if ($ad) {
+            $mac = ($ad.MacAddress -replace '[-:]', ':').ToLower()
+            if ($mac -notmatch '^([0-9a-f]{2}:){5}[0-9a-f]{2}$') {
+                $mac = ($ad.MacAddress -replace '[-.]', ':').ToLower()
+            }
+            return $mac
+        }
+    } catch {}
+    return $null
+}
+
+function Get-WifiIpAddress {
+    try {
+        $ad = Get-NetAdapter | Where-Object {
+            ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
+            $_.Status -eq 'Up' -and
+            $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
+        } | Select-Object -First 1
+        if ($ad) {
+            $ip = Get-NetIPAddress -InterfaceIndex $ad.IfIndex -AddressFamily IPv4 -ErrorAction Stop
+            return $ip.IPAddress
+        }
+    } catch {}
+    return $null
+}
+
+function Get-CurrentSsid {
+    try {
+        $wifi = netsh wlan show interfaces | Out-String
+        if ($wifi -match 'SSID\s*:\s*(.+)') {
+            return $matches[1].Trim()
+        }
+    } catch {}
+    return $null
+}
+
+function Is-SsidConnected {
+    param([string]$targetSsid)
+    if ([string]::IsNullOrEmpty($targetSsid)) { return $true }
+    $current = Get-CurrentSsid
+    if ($current -eq $targetSsid) {
+        $adapter = Get-NetAdapter | Where-Object {
+            ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
+            $_.Status -eq 'Up' -and
+            $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
+        } | Select-Object -First 1
+        return ($null -ne $adapter)
+    }
+    return $false
+}
+
+function Reconnect-ToSsid {
+    param([string]$targetSsid)
+    if ([string]::IsNullOrEmpty($targetSsid)) { return }
+    Write-Host "[*] 当前已断开 $targetSsid,尝试重连..." -ForegroundColor Yellow
+    try {
+        $profiles = netsh wlan show profiles | Out-String
+        if ($profiles -notmatch $targetSsid) {
+            Write-Host "[!] 未找到已保存的 WiFi 配置: $targetSsid" -ForegroundColor Red
+            return
+        }
+        netsh wlan disconnect | Out-Null
+        Start-Sleep -Milliseconds 500
+        netsh wlan connect name="$targetSsid" | Out-Null
+        Write-Host "[*] 正在连接 $targetSsid ..." -ForegroundColor Cyan
+        for ($i = 0; $i -lt 15; $i++) {
+            Start-Sleep -Seconds 1
+            if (Is-SsidConnected $targetSsid) {
+                Write-Host "[+] WiFi 重连成功" -ForegroundColor Green
+                return
+            }
+        }
+        Write-Host "[!] WiFi 重连超时" -ForegroundColor Red
+    } catch {
+        Write-Host "[!] WiFi 重连失败: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+
+# ============= 认证 =============
+
+function Invoke-CampusLogin {
+    param($profile, [string]$password)
+
+    Write-Host ""
+    Write-Host "===== 新乡工程学院校园网登录 (v1.9.0+) =====" -ForegroundColor Cyan
+    Write-Host "    账号: $($profile.user_id)" -ForegroundColor White
+    Write-Host "    运营商: $(Get-OperatorName $profile.operator)" -ForegroundColor White
+    Write-Host "    认证地址: $($profile.base_url)" -ForegroundColor White
+    Write-Host "    SSID: $($profile.ssid)" -ForegroundColor White
+    Write-Host ""
+
+    # 1. 拿运行时网络信息
+    $localIp = Get-WifiIpAddress
+    $localMac = Get-WirelessMacAddress
+    if ($localIp)  { $wlanUserIp = $localIp }  else { $wlanUserIp = $profile.wlan_user_ip }
+    if ($localMac) { $macAddress = $localMac } else { $macAddress = $profile.mac_address }
+
+    # 2. WiFi 状态检查
+    if (-not (Is-SsidConnected $profile.ssid)) {
+        Reconnect-ToSsid $profile.ssid
+    }
+
+    # 3. 构造 quickauth.do URL
+    $hostname = if ($profile.hostname) { $profile.hostname } else { $env:COMPUTERNAME }
+    $portalPageId = if ($profile.portal_page_id) { $profile.portal_page_id } else { "3" }
+    $portalType   = if ($profile.portal_type)    { $profile.portal_type }    else { "0" }
+    $version      = if ($profile.version)        { $profile.version }        else { "0" }
+    $bindCtrlId   = if ($profile.bind_ctrl_id)   { $profile.bind_ctrl_id }   else { "" }
+
+    $authUrl = $profile.base_url -replace '/\w+\.do', '/quickauth.do'
+
+    $queryParams = @(
+        "userid=$([Uri]::EscapeDataString($profile.user_id))",
+        "passwd=$([Uri]::EscapeDataString($password))",
+        "wlanuserip=$wlanUserIp",
+        "wlanacname=$([Uri]::EscapeDataString($profile.wlan_ac_name))",
+        "wlanacIp=$($profile.wlan_ac_ip)",
+        "ssid=$($profile.ssid)",
+        "vlan=$($profile.vlan)",
+        "mac=$macAddress",
+        "version=$version",
+        "portalpageid=$portalPageId",
+        "timestamp=$([int](Get-Date -UFormat %s) * 1000)",
+        "uuid=$([guid]::NewGuid().ToString())",
+        "portaltype=$portalType",
+        "hostname=$([Uri]::EscapeDataString($hostname))",
+        "bindCtrlId=$bindCtrlId"
+    ) -join "&"
+    $requestUrl = $authUrl + "?" + $queryParams
+    Write-Host "[*] 请求: $requestUrl" -ForegroundColor Gray
+
+    # 4. 发送
+    try {
+        $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop -Proxy $null
+        $body = $response.Content
+        Write-Host "[*] HTTP $($response.StatusCode): $body" -ForegroundColor White
+
+        if ($body -match '"code"\s*:\s*0' -or $body -match "success" -or $body -match "认证成功") {
+            Write-Host "[+] 认证成功,已连接到互联网" -ForegroundColor Green
+            return 0
+        } elseif ($body -match '"code"\s*:\s*1' -or $body -match "账号不存在") {
+            Write-Host "[!] 认证失败:账号不存在,请检查学号和运营商" -ForegroundColor Red
+            return 1
+        } elseif ($body -match '"code"\s*:\s*44' -or $body -match "非法接入") {
+            Write-Host "[!] 认证失败:非法接入,请检查 VLAN / MAC" -ForegroundColor Red
+            return 44
+        } else {
+            Write-Host "[!] 认证结果未知,请检查账号密码" -ForegroundColor Yellow
+            return 99
+        }
+    } catch {
+        Write-Host "[!] 认证请求失败: $($_.Exception.Message)" -ForegroundColor Red
+        return 99
+    }
+}
+
+# ============= 主流程 =============
 
 try {
-    $config = [NetworkConfig]::new()
-    $configMgr = [ConfigManager]::new((Join-Path $env:APPDATA "xxgc_campus_net_config.txt"))
-    $netHelper = [NetworkInterfaceHelper]::new()
-    $authClient = [AuthenticationClient]::new($config, $configMgr, $netHelper)
-    $authClient.Run($args -contains '--non-interactive')
-}
-catch {
-    Write-Host "`n脚本执行出错：$($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "详细错误：$($_.ScriptStackTrace)" -ForegroundColor DarkGray
-    Read-Host "按 Enter 键退出"
+    $profile = Load-LoginProfile
+    if ($null -eq $profile) {
+        exit 2
+    }
+    $password = Get-LoginPassword
+    if ($null -eq $password) {
+        exit 3
+    }
+    $code = Invoke-CampusLogin -profile $profile -password $password
+    if ($args -contains '--non-interactive') {
+        # 自动调用模式:直接退出,带返回码
+        exit $code
+    } else {
+        # 交互模式:暂停
+        Read-Host "`n按 Enter 键退出" | Out-Null
+        exit $code
+    }
+} catch {
+    Write-Host "[!] 脚本执行出错: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "    $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+    if ($args -notcontains '--non-interactive') {
+        Read-Host "`n按 Enter 键退出" | Out-Null
+    }
     exit 1
 }
