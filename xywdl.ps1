@@ -97,30 +97,21 @@ function Get-LoginPassword {
         return $null
     }
     try {
-        # 文件格式:"DPAPI" magic (4 字节) + 长度 (4 字节 LE) + 加密数据
+        # v1.9.0+ 简化: 文件就是裸 DPAPI blob (ProtectedData::Protect 输出字节流)
+        # 与 PS 端 ConvertFrom-SecureString / Rust 端 CryptProtectData 输出一致
         $bytes = [System.IO.File]::ReadAllBytes($CredPath)
-        if ($bytes.Length -lt 8) {
+        if ($bytes.Length -lt 16) {
             throw "credential 文件过短 ($($bytes.Length) 字节)"
         }
-        $magic = [System.Text.Encoding]::ASCII.GetString($bytes[0..3])
-        if ($magic -ne "DPAPI") {
-            throw "credential magic 错误,期望 DPAPI,得到 '$magic'"
-        }
-        $len = [BitConverter]::ToInt32($bytes, 4)
-        if ($len -le 0 -or $len -gt ($bytes.Length - 8)) {
-            throw "credential 长度异常: $len (文件总长 $($bytes.Length))"
-        }
-        $protected = $bytes[8..(7 + $len)]
 
         # DPAPI 解密 (无 entropy, 走 CurrentUser scope)
         $plain = [System.Security.Cryptography.ProtectedData]::Unprotect(
-            $protected,
+            $bytes,
             $null,
             [System.Security.Cryptography.DataProtectionScope]::CurrentUser
         )
         # 解出的是 UTF-16 LE 字节,还原成字符串
         $text = [System.Text.Encoding]::Unicode.GetString($plain)
-        # 去掉尾部 NUL (Rust 端可能没加,但防御性去掉)
         return $text.TrimEnd("`0")
     } catch {
         Write-Host "[!] 解密密码失败: $($_.Exception.Message)" -ForegroundColor Red

@@ -547,12 +547,8 @@ fn encrypt_password(plain: &str) -> Result<Vec<u8>, String> {
             let _ = LocalFree(HLOCAL(output.pbData as *mut _));
         }
 
-        // 写 4 字节 magic "DPAPI" + 4 字节 LE 长度 + 加密数据
-        let mut out = Vec::with_capacity(8 + protected_bytes.len());
-        out.extend_from_slice(b"DPAPI");
-        out.extend_from_slice(&(protected_bytes.len() as u32).to_le_bytes());
-        out.extend_from_slice(&protected_bytes);
-        Ok(out)
+        // 直接写裸 DPAPI blob (v1.9.0+ 简化: 不再加 magic 头, 与 PS 端 ProtectedData::Protect 字节布局一致)
+        Ok(protected_bytes)
     }
 }
 
