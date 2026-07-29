@@ -93,10 +93,24 @@ function Load-LoginProfile {
         }
         $json = $content | ConvertFrom-Json -ErrorAction Stop
 
+        # 烟囱 29.1 修复: PSObject.Properties 在 $json 不是 hashtable/object (如纯数字 12345) 时返回 $null
+        if ($null -eq $json) {
+            Write-Host "[!] 登录配置不是有效的对象: $ProfilePath" -ForegroundColor Red
+            Write-Host "    请在 UI 中重新保存配置。" -ForegroundColor Yellow
+            return $null
+        }
+        if (-not ($json -is [hashtable] -or $json -is [PSCustomObject] -or $json.PSObject -ne $null)) {
+            Write-Host "[!] 登录配置不是有效的对象: $ProfilePath (类型: $($json.GetType().Name))" -ForegroundColor Red
+            Write-Host "    请在 UI 中重新保存配置。" -ForegroundColor Yellow
+            return $null
+        }
+        # 拿到字段名 (兼容 hashtable 和 PSCustomObject)
+        $fieldNames = if ($json -is [hashtable]) { $json.Keys } else { $json.PSObject.Properties.Name }
+
         $required = @("user_id", "operator", "base_url", "vlan", "mac_address", "ssid", "wlan_ac_name", "wlan_ac_ip")
         # wlan_user_ip 是可选的,运行时由 Get-WifiIpAddress() 自动取本地 IP 兜底
         foreach ($f in $required) {
-            if (-not $json.PSObject.Properties.Name.Contains($f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
+            if (-not ($fieldNames -contains $f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
                 Write-Host "[!] 登录配置缺少字段: $f" -ForegroundColor Red
                 return $null
             }
@@ -338,11 +352,30 @@ function Invoke-CampusLogin {
 
     $authUrl = $profile.base_url -replace '/\w+\.do', '/quickauth.do'
 
+    # 烟囱 29.2 修复: [Uri]::EscapeDataString 对超长字符串会抛 UriFormatException
+    # 用 try/catch 包裹, 失败时退化为 PowerShell 自带 [uri]::EscapeDataString / [Web.HttpUtility]::UrlEncode
+    # 如果都失败, 返回空字符串, 但不中断整个登录流程
+    function Safe-UriEscape {
+        param([string]$s)
+        try {
+            return [Uri]::EscapeDataString($s)
+        } catch {
+            # PS 7+ 有 [uri]::EscapeDataString 也可用
+            try { return [uri]::EscapeDataString($s) } catch { return "" }
+        }
+    }
+    function Safe-UriUnescape {
+        param([string]$s)
+        try {
+            return [Uri]::UnescapeDataString($s)
+        } catch { return "" }
+    }
+
     $queryParams = @(
-        "userid=$([Uri]::EscapeDataString($profile.user_id))",
-        "passwd=$([Uri]::EscapeDataString($password))",
+        "userid=$(Safe-UriEscape $profile.user_id)",
+        "passwd=$(Safe-UriEscape $password)",
         "wlanuserip=$wlanUserIp",
-        "wlanacname=$([Uri]::EscapeDataString($profile.wlan_ac_name))",
+        "wlanacname=$(Safe-UriEscape $profile.wlan_ac_name)",
         "wlanacIp=$($profile.wlan_ac_ip)",
         "ssid=$($profile.ssid)",
         "vlan=$($profile.vlan)",
@@ -352,7 +385,7 @@ function Invoke-CampusLogin {
         "timestamp=$([int](Get-Date -UFormat %s) * 1000)",
         "uuid=$([guid]::NewGuid().ToString())",
         "portaltype=$portalType",
-        "hostname=$([Uri]::EscapeDataString($hostname))",
+        "hostname=$(Safe-UriEscape $hostname)",
         "bindCtrlId=$bindCtrlId"
     ) -join "&"
     $requestUrl = $authUrl + "?" + $queryParams

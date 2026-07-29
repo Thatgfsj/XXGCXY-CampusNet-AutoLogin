@@ -1393,17 +1393,17 @@ pub fn run() {
                 });
             }
 
-            let config_path = get_config_path();
-            if config_path.exists() {
-                if let Ok(content) = fs::read_to_string(&config_path) {
-                    if let Ok(config) = serde_json::from_str::<Config>(&content) {
-                        if !config.primary_ssid.is_empty() {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.hide();
-                            }
-                        }
-                    }
+            // 启动窗口行为 (用户优先级要求): 有登录信息 → 隐藏到托盘; 没登录信息 → 显示
+            // 用 is_login_configured 检查 (login_profile.json + login_credential.bin 同时存在)
+            // 不再用 config.primary_ssid — v1.9.0 拆分 WiFi 配置和登录账号, WiFi 配了不等于登录账号配了
+            let login_configured = is_login_configured();
+            let should_hide = login_configured;
+            if let Some(window) = app.get_webview_window("main") {
+                if should_hide {
+                    let _ = window.hide();
                 }
+                // 不 hide: 窗口默认显示, 前端 checkFirstRun 会检测未配置状态
+                // 然后 setTimeout 500ms 后弹登录配置屏提示用户填写
             }
 
             Ok(())
