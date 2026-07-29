@@ -192,7 +192,7 @@ jobs:
   # ============================================
   # v1.9.0 调试阶段临时禁用,只跑构建,回头手动发布
   release:
-    if: ${{ false }}  # v1.9.0 临时禁掉, 改回 true 再发布
+    if: ${{ true }}  # v1.9.0 正式发布启用
     needs: [build-windows, build-linux, build-standalone-sh]
     runs-on: ubuntu-latest
     steps:
@@ -241,11 +241,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.9.0
-          name: v1.9.0 - xiaoyuanwangluo zidong denglu zhushou
+          name: v1.9.0 - 校园网自动登录助手
           body: |
-            v1.9.0 - xiaoyuanwangluo zidong denglu zhushou (TBD, 待写)
+            v1.9.0 - 校园网自动登录助手
 
-            ## Download
+            ## 系统要求
+
+            - **Windows 10/11**: 自带 PowerShell 5.1+ / .NET Framework 4.x
+            - **Windows 7/8**: 需装 WMF 5.1（[下载](https://www.microsoft.com/en-us/download/details.aspx?id=54616)）
+            - **Linux**: 需 pwsh 7+（[安装](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux)）
+
+            ## 下载
 
             **Windows (系统 PowerShell 5.1+, 体积小)**
             - `xxgcxy-wifi_1.9.0_x64-setup.exe` - NSIS installer (~5 MB)
@@ -259,21 +265,44 @@ jobs:
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs pwsh)
 
-            ## Changelog v1.9.0 (TBD)
-            - Feat: 登录模块解耦,可视化配置 (运营商/学号/密码/Portal URL)
-            - Feat: 首次启动自动弹出登录配置屏
-            - Feat: 主页"登录（更换）"按钮
-            - Feat: 网络配置页"更改账号信息"按钮
-            - Feat: Portal URL 一键解析自动填充 SSID/AC/VLAN/MAC
-            - Refactor: xywdl.ps1 从 604 行简化到 280 行,移除交互式 Read-Host 和自动检测
-            - Refactor: 配置从硬编码改为 JSON 模板 (login_profile.json)
-            - Security: 密码用 Windows DPAPI 加密 (login_credential.bin)
-            - Breaking: 不兼容旧 %APPDATA%/xxgc_campus_net_config.txt
+            ## What's New in v1.9.0
+
+            ### 新功能 (Feat)
+            - **登录模块解耦**: 改为 JSON 模板 (login_profile.json) + 渲染器模式
+            - **可视化登录配置屏** (`#loginConfigScreen`): 运营商/学号/密码/Portal URL
+            - **首次启动自动弹窗**: 未配置账号时强制弹登录配置屏
+            - **设置页入口** ("更改账号信息" 按钮)
+            - **Portal URL 一键解析**: 粘贴重定向 URL → 自动填充 SSID/AC/VLAN/MAC
+            - **密码用 Windows DPAPI 加密** (login_credential.bin)
+
+            ### 重构 (Refactor)
+            - **xywdl.ps1** 从 604 行简化到 280 行 (-54%)
+            - 移除交互式 Read-Host 和自动检测 portal 重定向
+            - 配置从硬编码改为 JSON 模板
+
+            ### 修复 (Fix)
+            - 修复校园网配置读取路径
+            - xywdl.bat 修复编码问题
+            - 移除 Unix-only 的 `Permissions::from_mode` 调用，修复 Windows 编译
+            - **urldecode UTF-8 多字节字符支持** (修复中文/emoji 乱码)
+            - **前端 XSS 修复** (DOM API 替代 innerHTML)
+            - **CI 编译错误修复** (url_decode_form 末尾多余变量)
+            - 启动窗口行为修复 (没登录信息不隐藏，有则隐藏)
+
+            ### 破坏性变更 (Breaking)
+            - **不兼容** 旧的 `%APPDATA%\xxgc_campus_net_config.txt`
+            - 首次启动需要重新配置账号
+
+            ## 升级说明
+
+            从 v1.8.x 升级：
+            1. 备份旧配置：`%APPDATA%\xxgc_campus_net_config.txt` 中的学号和密码
+            2. 安装 v1.9.0 安装包
+            3. 启动后会看到登录配置屏，填入学号/密码/Portal URL
+            4. WiFi 配置 (主网络/备用网络) 保留
           files: |
-            artifacts/win-portable/*.exe
-            artifacts/win-portable/*.msi
-            artifacts/win-system/*.exe
-            artifacts/win-system/*.msi
+            artifacts/windows/*.exe
+            artifacts/windows/*.msi
             artifacts/linux/*.deb
             artifacts/linux/*.tar.gz
             artifacts/linux/*.rpm
