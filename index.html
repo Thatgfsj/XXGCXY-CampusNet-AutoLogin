@@ -1381,10 +1381,21 @@
                 const networks = await invoke('scan_wifi');
                 wifiNetworks = networks;
                 renderWifiList();
+                if (networks.length === 0) {
+                    addLog('⚠️ WiFi 扫描完成但列表为空 (netsh 没返回任何网络)');
+                } else {
+                    addLog(`✓ WiFi 扫描完成: ${networks.length} 个网络`);
+                }
             } catch (e) {
                 addLog('扫描WiFi失败: ' + e);
-                document.getElementById('wifiList').innerHTML = 
-                    '<div style="padding: 20px; text-align: center; color: #666;">扫描失败，请重试</div>';
+                document.getElementById('wifiList').innerHTML =
+                    '<div style="padding: 20px; text-align: center; color: #b91c1c;">'
+                    + '<strong>扫描失败</strong><br><br>'
+                    + '<span style="font-size: 12px; color: #666; word-break: break-all;">'
+                    + String(e).replace(/</g, '&lt;') + '</span><br><br>'
+                    + '<span style="font-size: 11px; color: #888;">可能原因: 电脑没有 WiFi 网卡 / 无线网卡被禁用 / 权限不足<br>'
+                    + '可手动运行 <code>netsh wlan show networks mode=bssid</code> 验证</span>'
+                    + '</div>';
             }
         }
         

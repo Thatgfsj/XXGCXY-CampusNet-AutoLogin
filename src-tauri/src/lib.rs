@@ -732,6 +732,19 @@ async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
             .output()
             .map_err(|e| format!("执行扫描命令失败: {}", e))?;
         let stdout = String::from_utf8_lossy(&output.stdout);
+
+        // 诊断: netsh 命令本身失败(典型: "系统上没有无线接口")在 stdout 不显示但在 stderr 显示
+        // 把 stderr 信息带上,方便定位"没扫到 WiFi"的根因
+        let stderr_text = String::from_utf8_lossy(&output.stderr).to_string();
+        if !output.status.success() || stdout.trim().is_empty() {
+            return Err(format!(
+                "netsh 扫描失败: exit={:?}, stdout_len={}, stderr={}",
+                output.status.code(),
+                stdout.len(),
+                if stderr_text.is_empty() { "<empty>".to_string() } else { stderr_text.trim().to_string() }
+            ));
+        }
+
         let mut networks = Vec::new();
         let mut current_ssid = String::new();
         let mut current_signal: u8 = 0;
