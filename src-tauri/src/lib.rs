@@ -440,7 +440,6 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
         String::from_utf8(out.clone()).unwrap_or_else(|_| {
             out.iter().map(|&b| b as char).collect()
         })
-        out
     }
 
     let decoded = url_decode(&url);
