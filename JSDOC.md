@@ -397,10 +397,9 @@ pub struct ParsedPortal {
 - 状态面板（图标 + 状态文字 + 详情）
 - 网络信息面板（当前 WiFi / 主网络 / 备用网络 / 检测间隔）
 - "立即检测网络" 按钮
-- "登录（更换）校园网账号" 按钮(v1.9.0+,跳转 loginConfigScreen)
 - 自动检测开关（toggle）
 - 开机自启动开关（toggle）
-- "网络配置" 按钮 → 切换到配置界面
+- "设置" 按钮(v1.9.0+ 改名为"设置",原"网络配置")→ 切换到设置界面
 - 日志面板（黑色终端风格，保留最近 50 条）
 - GitHub 链接
 
@@ -413,7 +412,8 @@ pub struct ParsedPortal {
 - 「保存」/「保存并登录」/「取消」按钮
 - 首次启动时强制弹出,提供"稍后"按钮可跳过
 
-**配置界面（setupScreen）**：
+**设置界面（setupScreen,v1.9.0+ 改名为"设置",原"网络配置"）**：
+- 顶部分组:"📡 WiFi 网络"
 - WiFi 列表（带信号强度、可点击选择主/备用网络）
 - 已选主网络 / 备用网络显示
 - 检测间隔输入（5-300 秒）
@@ -709,7 +709,7 @@ AC → 放行该 IP/MAC → 客户端可以上网
   - **登录配置从硬编码改为 JSON 模板 + 渲染器模式**。`%APPDATA%/xxgcxy-wifi/login_profile.json` 存元数据(学号/运营商/SSID/Portal URL/AC/VLAN/MAC 等),`login_credential.bin` 存 DPAPI 加密的密码。
   - **xywdl.ps1 大幅简化**:从 604 行的 6 个类改为 ~280 行的函数式脚本,移除交互式 Read-Host、移除自动检测 portal 重定向(`TryAutoDetectParams`)、移除手动粘贴 URL 引导。
   - **新增登录配置屏**(`#loginConfigScreen`):运营商下拉 + 学号 + 密码 + Portal URL(带解析按钮)+ 高级字段折叠(SSID/AC/VLAN/MAC/主机名)。首次启动强制弹窗,提供"稍后"按钮可跳过。
-  - **主页 + 网络配置页加入口按钮**:主页"登录（更换）校园网账号"、网络配置页"更改账号信息"。
+  - **主页 + 设置页加入口按钮**:主页不再有独立的"登录（更换）"按钮,所有账号管理通过"设置"页(原"网络配置"页 v1.9.0+ 改名为"设置")→ 校园网信息卡片 → "更改账号信息"按钮。
   - **新增 6 个 Tauri 命令**:`is_login_configured` / `get_login_profile` / `save_login_profile` / `clear_login_profile` / `parse_portal_url` / `run_login_with_profile`。
   - **DPAPI 跨进程密码保护**:Rust 端用 `CryptProtectData` 加密 UTF-16 字节(无 entropy),PS 端用 `ProtectedData.Unprotect($null, CurrentUser)` 解密。文件格式 `b"DPAPI" + u32 长度 + 密文`。
   - **不兼容旧的 `xxgc_campus_net_config.txt`**,首次启动会引导用户重新配置;`clear_campus_net_info` 同时清理新旧文件。

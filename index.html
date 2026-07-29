@@ -466,10 +466,6 @@
             🔄 立即检测网络
         </button>
 
-        <button class="btn btn-primary" id="loginAccountBtn" onclick="showLoginConfig(false)" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
-            🎓 登录（更换）校园网账号
-        </button>
-        
         <div class="toggle-container">
             <span class="toggle-label">🔔 自动检测网络</span>
             <label class="toggle-switch">
@@ -477,7 +473,7 @@
                 <span class="toggle-slider"></span>
             </label>
         </div>
-        
+
         <div class="toggle-container">
             <span class="toggle-label">🚀 开机自启动</span>
             <label class="toggle-switch">
@@ -485,9 +481,9 @@
                 <span class="toggle-slider"></span>
             </label>
         </div>
-        
+
         <button class="btn btn-secondary" onclick="showSetup()">
-            ⚙️ 网络配置
+            ⚙️ 设置
         </button>
         
         <div class="log-box" id="logBox">
@@ -502,10 +498,11 @@
     
     <!-- 配置界面 -->
     <div class="container hidden" id="setupScreen">
-        <h1>⚙️ 网络配置</h1>
-        
+        <h1>⚙️ 设置</h1>
+
+        <h3 style="margin-top: 20px; color: #667eea;">📡 WiFi 网络</h3>
         <p style="margin-bottom: 15px; color: #666;">请选择您要连接的主网络和备用网络：</p>
-        
+
         <div class="wifi-list" id="wifiList">
             <div style="padding: 20px; text-align: center; color: #666;">
                 正在扫描WiFi...
