@@ -386,11 +386,39 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
     }
 
     // 简化版 URL 解码:用 percent-decoding 的核心规则
+    // (注: + 不被转空格,因为 portal.do URL 是 redirect URL,不是 form-data)
     fn url_decode(s: &str) -> String {
         let mut out = String::with_capacity(s.len());
         let bytes = s.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let Ok(b) = u8::from_str_radix(
+                    std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00"),
+                    16,
+                ) {
+                    out.push(b as char);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+        out
+    }
+
+    // form-encoded 形式: + 也转空格 (application/x-www-form-urlencoded)
+    fn url_decode_form(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'+' {
+                out.push(' ');
+                i += 1;
+                continue;
+            }
             if bytes[i] == b'%' && i + 2 < bytes.len() {
                 if let Ok(b) = u8::from_str_radix(
                     std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00"),
@@ -452,7 +480,9 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
             let mut parts = kv.splitn(2, '=');
             let k = parts.next().unwrap_or("").to_lowercase();
             let v_raw = parts.next().unwrap_or("");
-            let v = url_decode(v_raw);
+            // portal.do redirect URL 的 query 实际是 form-encoded,
+            // + 应该转空格, 用 url_decode_form
+            let v = url_decode_form(v_raw);
             match k.as_str() {
                 "wlanuserip" => parsed.wlan_user_ip = v,
                 "wlanacname" => parsed.wlan_ac_name = v,
@@ -916,15 +946,33 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
             ssid = escaped_ssid
         );
 
-        // 写入临时文件
+        // 用唯一临时文件名, 在所有路径(包括错误)上确保清理
         let tmp_dir = std::env::temp_dir();
-        let profile_path = tmp_dir.join(format!("xxgcxy_wifi_{}.xml", ssid));
-        fs::write(&profile_path, &profile_xml)
-            .map_err(|e| format!("创建配置文件失败: {}", e))?;
+        let profile_path = tmp_dir.join(format!(
+            "xxgcxy_wifi_{}_{}.xml",
+            ssid.replace(|c: char| !c.is_alphanumeric(), ""),
+            std::process::id()
+        ));
 
+        // RAII 守卫: 离开作用域时自动删除临时文件 (即使中途 panic)
+        struct TempFileGuard(PathBuf);
+        impl Drop for TempFileGuard {
+            fn drop(&mut self) {
+                let _ = fs::remove_file(&self.0);
+            }
+        }
+        let guard = TempFileGuard(profile_path.clone());
         let profile_path_str = profile_path.to_string_lossy().to_string();
 
-        // 导入配置文件
+        // 写文件
+        fs::write(&profile_path, &profile_xml)
+            .map_err(|e| {
+                // 写失败时也要触发 drop 删除
+                drop(guard);
+                format!("创建配置文件失败: {}", e)
+            })?;
+
+        // 导入配置文件 (不传播错误, 即使失败也继续重试 connect)
         let add_result = hidden_command("netsh")
             .args(["wlan", "add", "profile", &format!("filename={}", profile_path_str)])
             .output();
@@ -932,22 +980,26 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
             log::warn!("导入WLAN配置文件失败: {e}");
         }
 
-        // 清理临时文件
-        let _ = fs::remove_file(&profile_path);
-
         // 再次尝试连接（使用 name=）
-        let output2 = hidden_command("netsh")
+        let result = hidden_command("netsh")
             .args(["wlan", "connect", &format!("name={}", ssid)])
-            .output()
-            .map_err(|e| format!("执行连接命令失败: {}", e))?;
+            .output();
 
-        if output2.status.success() {
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            Ok(())
-        } else {
-            let stderr = String::from_utf8_lossy(&output2.stderr).to_string();
-            let stdout = String::from_utf8_lossy(&output2.stdout).to_string();
-            Err(format!("连接 WiFi 失败: {} {}", stderr, stdout))
+        // 提前 drop 触发清理
+        drop(guard);
+
+        match result {
+            Ok(output) => {
+                if output.status.success() {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    Ok(())
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    Err(format!("连接 WiFi 失败: {} {}", stderr, stdout))
+                }
+            }
+            Err(e) => Err(format!("执行连接命令失败: {}", e)),
         }
     }
 

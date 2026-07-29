@@ -1,8 +1,20 @@
 #!/bin/bash
-# 新乡工程学院校园网登录脚本 (Linux版)
+# 新乡工程学院校园网登录脚本 (Linux版, v1.9.0+ 简化)
+#
+# 配置文件 (跟 Rust 端 Linux 路径一致):
+#   $HOME/.config/xxgcxy-wifi/login_profile.json  - JSON 元数据 (snake_case)
+#   $HOME/.config/xxgcxy-wifi/login_credential.bin - 密码 (Linux 上是明文,Windows 上是 DPAPI 加密)
+#
+# 兼容 PS 5.1+ 的 .bin 格式: 本脚本只读明文。
+# Windows 上 .bin 是 DPAPI 加密的, 不能用本脚本。
+# Windows 用户请用 xywdl.bat -> xywdl.ps1。
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="$HOME/.config/xxgcxy-wifi/login_config.json"
+PROFILE_DIR="$HOME/.config/xxgcxy-wifi"
+PROFILE_FILE="$PROFILE_DIR/login_profile.json"
+CRED_FILE="$PROFILE_DIR/login_credential.bin"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -10,7 +22,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 log_info() { echo -e "${CYAN}$1${NC}"; }
 log_success() { echo -e "${GREEN}$1${NC}"; }
@@ -19,287 +31,148 @@ log_error() { echo -e "${RED}$1${NC}"; }
 
 echo -e "${CYAN}"
 echo "========================================"
-echo "  新乡工程学院校园网登录脚本 (Linux版)"
+echo "  新乡工程学院校园网登录脚本 (Linux版, v1.9.0+)"
 echo "========================================"
 echo -e "${NC}"
 
-# 加载配置
-load_config() {
-    if [[ -f "$CONFIG_FILE" ]]; then
-        CONFIG=$(cat "$CONFIG_FILE")
-        BASE_URL=$(echo "$CONFIG" | grep -o '"BaseURL":"[^"]*"' | cut -d'"' -f4)
-        WLAC_NAME=$(echo "$CONFIG" | grep -o '"WlanAcName":"[^"]*"' | cut -d'"' -f4)
-        WLAC_IP=$(echo "$CONFIG" | grep -o '"WlanAcIp":"[^"]*"' | cut -d'"' -f4)
-        VLAN=$(echo "$CONFIG" | grep -o '"Vlan":"[^"]*"' | cut -d'"' -f4)
-        WLAC_USER_IP=$(echo "$CONFIG" | grep -o '"WlanUserIp":"[^"]*"' | cut -d'"' -f4)
-        MAC=$(echo "$CONFIG" | grep -o '"MacAddress":"[^"]*"' | cut -d'"' -f4)
-        PASSWORD=$(echo "$CONFIG" | grep -o '"Password":"[^"]*"' | cut -d'"' -f4)
-        USER_ID=$(echo "$CONFIG" | grep -o '"UserId":"[^"]*"' | cut -d'"' -f4)
-        return 0
+# 检查 profile 文件
+if [[ ! -f "$PROFILE_FILE" ]]; then
+    log_error "[!] 未找到登录配置: $PROFILE_FILE"
+    log_warn "    请先在 UI 主页或设置页填写校园网账号信息。"
+    exit 2
+fi
+
+if [[ ! -f "$CRED_FILE" ]]; then
+    log_error "[!] 未找到密码文件: $CRED_FILE"
+    log_warn "    请重新在 UI 中保存配置。"
+    exit 2
+fi
+
+# 用 python3 解析 JSON (Linux 一般都装了, 比 jq 通用)
+if ! command -v python3 &>/dev/null; then
+    log_error "[!] 需要 python3 解析配置, 但找不到"
+    exit 1
+fi
+
+PROFILE_JSON=$(cat "$PROFILE_FILE")
+USER_ID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('user_id',''))")
+OPERATOR=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('operator',''))")
+BASE_URL=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url',''))")
+WLAN_AC_NAME=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_ac_name',''))")
+WLAN_AC_IP=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_ac_ip',''))")
+VLAN=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('vlan',''))")
+PROFILE_MAC=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('mac_address',''))")
+WLAN_USER_IP=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_user_ip',''))")
+SSID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ssid',''))")
+PORTAL_PAGE_ID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('portal_page_id','3'))")
+PORTAL_TYPE=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('portal_type','0'))")
+VERSION=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('version','0'))")
+BIND_CTRL_ID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('bind_ctrl_id',''))")
+HOSTNAME_VAL=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('hostname',''))")
+
+# 校验必需字段
+for f in "user_id:$USER_ID" "base_url:$BASE_URL" "vlan:$VLAN" "mac_address:$PROFILE_MAC"; do
+    key="${f%%:*}"
+    val="${f#*:}"
+    if [[ -z "$val" ]]; then
+        log_error "[!] 登录配置缺少字段: $key"
+        exit 2
     fi
-    return 1
-}
+done
 
-# 保存配置
-save_config() {
-    mkdir -p "$(dirname "$CONFIG_FILE")"
-    cat > "$CONFIG_FILE" << EOF
-{
-    "BaseURL": "$BASE_URL",
-    "WlanAcName": "$WLAC_NAME",
-    "WlanAcIp": "$WLAC_IP",
-    "Vlan": "$VLAN",
-    "WlanUserIp": "$WLAC_USER_IP",
-    "MacAddress": "$MAC",
-    "UserId": "$USER_ID",
-    "Password": "$PASSWORD"
-}
-EOF
-    chmod 600 "$CONFIG_FILE"
-    log_success "配置已保存到: $CONFIG_FILE"
-}
+# 读密码 (Linux 上是明文)
+PASSWORD=$(cat "$CRED_FILE")
 
-# 获取本机IP
-get_local_ip() {
-    ip route get 1 | grep -oP 'src \K[^ ]+' 2>/dev/null || \
-    ip addr show | grep 'inet ' | grep -v '127.0.0.1' | head -1 | awk '{print $2}' | cut -d'/' -f1
-}
+log_info "账号: $USER_ID"
+log_info "运营商: $OPERATOR"
+log_info "认证地址: $BASE_URL"
+log_info "SSID: $SSID"
+echo ""
 
-# 获取MAC地址
-get_mac_address() {
-    local iface=$(ip route get 1 2>/dev/null | grep -oP 'dev \K[^ ]+' | head -1)
-    if [[ -n "$iface" ]]; then
-        cat "/sys/class/net/$iface/address" 2>/dev/null | tr '[:lower:]' ':' || echo ""
+# 运行时 IP / MAC 兜底
+if [[ -z "$WLAN_USER_IP" ]]; then
+    WLAN_USER_IP=$(ip route get 1 2>/dev/null | grep -oP 'src \K[^ ]+' | head -1)
+fi
+if [[ -z "$WLAN_USER_IP" ]]; then
+    log_warn "[*] 拿不到本机 IP, wlanuserip 留空"
+fi
+
+LIVE_MAC=""
+if command -v ip &>/dev/null; then
+    IFACE=$(ip route get 1 2>/dev/null | grep -oP 'dev \K[^ ]+' | head -1)
+    if [[ -n "$IFACE" ]] && [[ -f "/sys/class/net/$IFACE/address" ]]; then
+        LIVE_MAC=$(cat "/sys/class/net/$IFACE/address" 2>/dev/null)
     fi
+fi
+if [[ -n "$LIVE_MAC" ]]; then
+    MAC=$(echo "$LIVE_MAC" | tr '[:upper:]' '[:lower:]')
+else
+    MAC=$(echo "$PROFILE_MAC" | tr '[:upper:]' '[:lower:]')
+fi
+log_info "[*] 使用 MAC: $MAC"
+
+# 构造 quickauth.do URL
+AUTH_URL=$(echo "$BASE_URL" | sed -E 's|/[A-Za-z0-9_-]+\.do$|/quickauth.do|')
+[[ -z "$HOSTNAME_VAL" ]] && HOSTNAME_VAL=$(hostname)
+
+TIMESTAMP=$(date +%s)000
+UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())")
+
+# 用 python3 做 URL 编码 (含 passwd 等可能含特殊字符的字段)
+QUERY=$(USER_ID="$USER_ID" PASSWORD="$PASSWORD" WLAN_USER_IP="$WLAN_USER_IP" \
+WLAN_AC_NAME="$WLAN_AC_NAME" WLAN_AC_IP="$WLAN_AC_IP" SSID="$SSID" VLAN="$VLAN" \
+MAC="$MAC" VERSION="$VERSION" PORTAL_PAGE_ID="$PORTAL_PAGE_ID" TIMESTAMP="$TIMESTAMP" \
+UUID="$UUID" PORTAL_TYPE="$PORTAL_TYPE" HOSTNAME_VAL="$HOSTNAME_VAL" BIND_CTRL_ID="$BIND_CTRL_ID" \
+python3 -c "
+import urllib.parse, os
+params = {
+    'userid': os.environ['USER_ID'],
+    'passwd': os.environ['PASSWORD'],
+    'wlanuserip': os.environ['WLAN_USER_IP'],
+    'wlanacname': os.environ['WLAN_AC_NAME'],
+    'wlanacIp': os.environ['WLAN_AC_IP'],
+    'ssid': os.environ['SSID'],
+    'vlan': os.environ['VLAN'],
+    'mac': os.environ['MAC'],
+    'version': os.environ['VERSION'],
+    'portalpageid': os.environ['PORTAL_PAGE_ID'],
+    'timestamp': os.environ['TIMESTAMP'],
+    'uuid': os.environ['UUID'],
+    'portaltype': os.environ['PORTAL_TYPE'],
+    'hostname': os.environ['HOSTNAME_VAL'],
+    'bindCtrlId': os.environ['BIND_CTRL_ID'],
 }
+print(urllib.parse.urlencode(params))
+")
 
-# 自动检测参数
-auto_detect_params() {
-    log_info "正在尝试自动获取登录参数..."
+REQUEST_URL="${AUTH_URL}?${QUERY}"
+log_info "[*] 请求: $REQUEST_URL"
 
-    local response=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 --noproxy '*' http://www.qq.com 2>/dev/null)
+# 发送 (带 noproxy 避免系统代理干扰, 跟 PS 端 -Proxy $null 一致)
+HTTP_CODE=$(curl -s -o /tmp/xywdl_response.txt -w "%{http_code}" \
+    --max-redirs 0 --noproxy '*' --max-time 15 \
+    "$REQUEST_URL" 2>&1 || echo "000")
 
-    if [[ -n "$response" && "$response" != "http://www.qq.com"* ]]; then
-        log_info "捕获到重定向: $response"
-        parse_redirect_url "$response"
-        return 0
-    fi
+RESPONSE=$(cat /tmp/xywdl_response.txt 2>/dev/null || echo "")
+rm -f /tmp/xywdl_response.txt
 
-    local local_ip=$(get_local_ip)
-    local local_mac=$(get_mac_address)
+log_info "[*] HTTP $HTTP_CODE: $RESPONSE"
 
-    response=$(curl -s -o /dev/null -w "%{redirect_url}" --max-redirs 0 --max-time 5 --noproxy '*' "http://172.18.252.12:6060" 2>/dev/null)
-    if [[ -n "$response" ]]; then
-        log_info "捕获到重定向: $response"
-        parse_redirect_url "$response"
-        if [[ -z "$WLAC_USER_IP" ]]; then WLAC_USER_IP="$local_ip"; fi
-        if [[ -z "$MAC" ]]; then MAC="$local_mac"; fi
-        return 0
-    fi
-
-    return 1
-}
-
-# 解析重定向URL
-parse_redirect_url() {
-    local url="$1"
-    local decoded=$(python3 -c "import urllib.parse; print(urllib.parse.unquote('$url'))" 2>/dev/null || echo "$url")
-
-    BASE_URL=$(echo "$decoded" | grep -oP '^(http://[^/]+(/\w+\.do))' | head -1)
-    WLAC_USER_IP=$(echo "$decoded" | grep -oP 'wlanuserip=([^&]+)' | cut -d'=' -f2)
-    WLAC_NAME=$(echo "$decoded" | grep -oP 'wlanacname=([^&]+)' | cut -d'=' -f2)
-    WLAC_IP=$(echo "$decoded" | grep -oP 'wlanacIp=([^&]+)' | cut -d'=' -f2)
-    MAC=$(echo "$decoded" | grep -oP 'mac=([^&]+)' | cut -d'=' -f2 | tr '[:upper:]' ':')
-    VLAN=$(echo "$decoded" | grep -oP 'vlan=([^&]+)' | cut -d'=' -f2)
-}
-
-# 手动输入参数
-manual_input() {
-    echo -e "${YELLOW}请按以下步骤操作：${NC}"
-    echo "1. 连接校园网（如果已经登录访问 2.2.2.2 来退出）"
-    echo "2. 打开浏览器访问任意网站（如 www.qq.com）"
-    echo "3. 浏览器会自动重定向到登录页面"
-    echo "4. 复制浏览器地址栏中的完整URL地址"
-    echo "5. 将URL粘贴到下面"
-    echo
-
-    read -p "请粘贴校园网登录链接: " manual_url
-
-    while [[ -z "$manual_url" || "$manual_url" != *"/portal.do"* ]]; do
-        log_error "URL格式不正确，请输入包含 /portal.do 的重定向URL"
-        read -p "请重新粘贴重定向URL: " manual_url
-    done
-
-    parse_redirect_url "$manual_url"
-    log_success "URL解析成功！"
-}
-
-# 选择运营商
-select_operator() {
-    echo -e "${YELLOW}请选择运营商:${NC}"
-    echo "  1. 移动 (@xxgcyd)"
-    echo "  2. 联通 (@xxgclt)"
-    echo "  3. 电信 (@xxgcdx)"
-
-    while true; do
-        read -p "请输入对应数字 (1/2/3): " choice
-        case $choice in
-            1) SUFFIX="@xxgcyd"; OPERATOR="移动"; break;;
-            2) SUFFIX="@xxgclt"; OPERATOR="联通"; break;;
-            3) SUFFIX="@xxgcdx"; OPERATOR="电信"; break;;
-            *) log_error "无效选择，请重新输入";;
-        esac
-    done
-}
-
-# 输入账号
-input_credentials() {
-    select_operator
-
-    read -p "请输入学号（纯数字）: " student_id
-    while ! [[ "$student_id" =~ ^[0-9]+$ ]] || [[ -z "$student_id" ]]; do
-        log_error "学号必须是纯数字！"
-        read -p "请重新输入学号: " student_id
-    done
-
-    USER_ID="${student_id}${SUFFIX}"
-    log_info "完整账号: $USER_ID ($OPERATOR)"
-
-    read -s -p "请输入校园网密码: " password
-    echo
-    read -s -p "请再次输入密码确认: " password2
-    echo
-
-    while [[ -z "$password" ]]; do
-        log_error "密码不能为空！"
-        read -s -p "请输入校园网密码: " password
-        echo
-    done
-
-    while [[ "$password" != "$password2" ]]; do
-        log_error "两次输入的密码不一致！"
-        read -s -p "请输入校园网密码: " password
-        echo
-        read -s -p "请再次输入密码确认: " password2
-        echo
-    done
-
-    PASSWORD="$password"
-}
-
-# 显示网络信息
-display_info() {
-    echo -e "${CYAN}--- 当前网络信息 ---${NC}"
-    echo -e "  认证地址: ${WHITE}${BASE_URL}${NC}"
-    echo -e "  AC名称:   ${WHITE}${WLAC_NAME}${NC}"
-    echo -e "  用户IP:  ${WHITE}${WLAC_USER_IP}${NC}"
-    echo -e "  MAC地址: ${WHITE}${MAC}${NC}"
-    echo -e "  VLAN:    ${WHITE}${VLAN}${NC}"
-}
-
-# 执行认证
-do_authenticate() {
-    log_info "正在执行认证..."
-
-    local local_ip=$(get_local_ip)
-    local local_mac=$(get_mac_address)
-
-    if [[ -n "$local_ip" ]]; then WLAC_USER_IP="$local_ip"; fi
-    if [[ -n "$local_mac" ]]; then MAC="$local_mac"; fi
-
-    local auth_url="${BASE_URL/portal.do/quickauth.do}"
-
-    local timestamp=$(date +%s000)
-    local uuid=$(cat /proc/sys/kernel/random/uuid)
-
-    local encoded_userid=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$USER_ID'))" 2>/dev/null)
-    local encoded_pwd=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$PASSWORD'))" 2>/dev/null)
-    local encoded_wlacname=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$WLAC_NAME'))" 2>/dev/null)
-    local encoded_hostname=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$HOSTNAME'))" 2>/dev/null)
-
-    local query="userid=${encoded_userid}&passwd=${encoded_pwd}&wlanuserip=${WLAC_USER_IP}&wlanacname=${encoded_wlacname}&wlanacIp=${WLAC_IP}&vlan=${VLAN}&mac=${MAC}&version=0&portalpageid=3&timestamp=${timestamp}&uuid=${uuid}&portaltype=0&hostname=${encoded_hostname}"
-
-    local full_url="${auth_url}?${query}"
-    log_info "请求地址: $full_url"
-
-    local response=$(curl -s -w "\n%{http_code}" --noproxy '*' "$full_url" 2>&1)
-    local http_code=$(echo "$response" | tail -1)
-    local body=$(echo "$response" | head -n -1)
-
-    echo -e "${CYAN}=== 认证响应 ===${NC}"
-    echo -e "HTTP状态码: ${GREEN}${http_code}${NC}"
-    echo -e "响应内容: ${WHITE}${body}${NC}"
-
-    if echo "$body" | grep -q '"code":0' || echo "$body" | grep -q "success" || echo "$body" | grep -q "认证成功"; then
-        echo
-        log_success "认证成功！您已连接到互联网。"
-        log_info "账号: $USER_ID"
-        return 0
-    elif echo "$body" | grep -q '"code":1' || echo "$body" | grep -q "账号不存在"; then
-        log_error "认证失败：账号不存在，请检查学号和运营商是否正确"
-    elif echo "$body" | grep -q '"code":44' || echo "$body" | grep -q "非法接入"; then
-        log_error "认证失败：非法接入，请检查VLAN ID或MAC地址是否正确"
-    else
-        log_warn "认证结果未知，请检查账号密码是否正确"
-    fi
-
-    return 1
-}
-
-# 主流程
-main() {
-    # 检查非交互模式
-    NON_INTERACTIVE=false
-    for arg in "$@"; do
-        if [[ "$arg" == "--non-interactive" ]]; then
-            NON_INTERACTIVE=true
-            break
-        fi
-    done
-
-    if load_config; then
-        log_info "已找到保存的配置，自动登录中..."
-        display_info
-        if do_authenticate; then
-            exit 0
-        fi
-    fi
-
-    log_info "=== 步骤1：自动获取登录参数 ==="
-    if auto_detect_params; then
-        display_info
-    else
-        if [[ "$NON_INTERACTIVE" == "true" ]]; then
-            log_error "自动获取参数失败，非交互模式下无法手动输入，退出"
-            exit 1
-        fi
-        log_warn "自动获取参数失败，请手动输入"
-        manual_input
-        display_info
-        input_credentials
-
-        read -p "是否保存配置？(y/N): " save
-        if [[ "$save" == "y" || "$save" == "Y" ]]; then
-            save_config
-        fi
-    fi
-
-    if [[ -z "$PASSWORD" ]]; then
-        if [[ "$NON_INTERACTIVE" == "true" ]]; then
-            log_error "非交互模式，缺少密码，退出"
-            exit 1
-        fi
-        input_credentials
-        save_config
-    fi
-
-    echo
-    log_info "=== 步骤3：开始认证 ==="
-    do_authenticate
-
-    if [[ "$NON_INTERACTIVE" == "false" ]]; then
-        read -p "按 Enter 键退出脚本" dummy
-    fi
-}
-
-main "$@"
+# 判定结果 (跟 PS 端一致)
+if echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*0' \
+   || echo "$RESPONSE" | grep -q "success" \
+   || echo "$RESPONSE" | grep -q "认证成功"; then
+    log_success "[+] 认证成功,已连接到互联网"
+    exit 0
+elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*1' \
+     || echo "$RESPONSE" | grep -q "账号不存在"; then
+    log_error "[!] 认证失败:账号不存在"
+    exit 1
+elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*44' \
+     || echo "$RESPONSE" | grep -q "非法接入"; then
+    log_error "[!] 认证失败:非法接入"
+    exit 44
+else
+    log_warn "[!] 认证结果未知"
+    exit 99
+fi

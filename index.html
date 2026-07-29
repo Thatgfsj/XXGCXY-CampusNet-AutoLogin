@@ -1079,10 +1079,21 @@
             document.getElementById('loginConfigScreen').classList.add('hidden');
             document.getElementById('setupScreen').classList.remove('hidden');
 
+            // 取消可能还在的首次启动弹窗 timer (用户在 500ms 内点了"设置"按钮)
+            if (firstRunTimerId) {
+                clearTimeout(firstRunTimerId);
+                firstRunTimerId = null;
+            }
+
             // 扫描WiFi
             await scanWifi();
             // 加载校园网信息
             await loadCampusNetInfo();
+            // 同步最新网络状态 (用户在设置页也能看到当前 WiFi/网络)
+            try {
+                const status = await invoke('check_network');
+                updateStatus(status);
+            } catch (e) { /* 忽略, 不阻塞设置页 */ }
         }
         window.showSetup = showSetup;
 
@@ -1133,15 +1144,25 @@
 
         // 是否首次启动(用于控制"取消"按钮行为)
         let isFirstRunSetup = false;
+        // 首次启动弹窗 setTimeout 的句柄, 用于取消避免竞态
+        let firstRunTimerId = null;
 
         // 显示登录配置屏
         // firstRun: true 表示首次启动,会要求强制配置;false 表示用户主动修改
         async function showLoginConfig(firstRun) {
+            // 如果是首次启动, 取消可能还没触发的 setTimeout (避免竞态)
+            if (firstRunTimerId) {
+                clearTimeout(firstRunTimerId);
+                firstRunTimerId = null;
+            }
             isFirstRunSetup = !!firstRun;
 
             document.getElementById('mainScreen').classList.add('hidden');
             document.getElementById('setupScreen').classList.add('hidden');
             document.getElementById('loginConfigScreen').classList.remove('hidden');
+
+            // 取消首次启动弹窗 (用户主动点了"更改账号信息"就不应该再弹)
+            // (已经 clearTimeout 了)
 
             // 隐藏错误/成功提示
             const errEl = document.getElementById('loginConfigError');
@@ -1366,7 +1387,15 @@
                 const configured = await invoke('is_login_configured');
                 if (!configured) {
                     addLog('👋 检测到首次启动,请配置校园网账号');
-                    setTimeout(() => showLoginConfig(true), 500);
+                    // 500ms 后弹登录配置屏, 但保存 setTimeout 句柄, 用户点了"设置"会取消
+                    firstRunTimerId = setTimeout(() => {
+                        firstRunTimerId = null;
+                        // 二次检查: 如果当前还在主屏才弹(防止 setupScreen 切走后又被弹回)
+                        const mainScreen = document.getElementById('mainScreen');
+                        if (!mainScreen.classList.contains('hidden')) {
+                            showLoginConfig(true);
+                        }
+                    }, 500);
                 } else {
                     addLog('✓ 校园网账号已配置');
                 }
@@ -1481,18 +1510,28 @@
         window.saveConfig = saveConfig;
         
         // 添加日志
+        // 用 textContent 不用 innerHTML 避免 XSS (PS 输出含 < > & 字符时不会被解析)
         function addLog(message) {
             const logBox = document.getElementById('logBox');
             const now = new Date();
             const time = now.toTimeString().split(' ')[0];
-            
+
             const entry = document.createElement('div');
             entry.className = 'log-entry';
-            entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
-            
+
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'log-time';
+            timeSpan.textContent = `[${time}]`;
+
+            const msgSpan = document.createElement('span');
+            msgSpan.textContent = ' ' + message;
+
+            entry.appendChild(timeSpan);
+            entry.appendChild(msgSpan);
+
             logBox.appendChild(entry);
             logBox.scrollTop = logBox.scrollHeight;
-            
+
             // 保留最近50条日志
             while (logBox.children.length > 50) {
                 logBox.removeChild(logBox.firstChild);
