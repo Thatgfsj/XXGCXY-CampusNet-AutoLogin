@@ -965,12 +965,9 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
         let profile_path_str = profile_path.to_string_lossy().to_string();
 
         // 写文件
+        // guard 在 fs::write 失败时通过 ? 早返回, 自动 drop 删除临时文件
         fs::write(&profile_path, &profile_xml)
-            .map_err(|e| {
-                // 写失败时也要触发 drop 删除
-                drop(guard);
-                format!("创建配置文件失败: {}", e)
-            })?;
+            .map_err(|e| format!("创建配置文件失败: {}", e))?;
 
         // 导入配置文件 (不传播错误, 即使失败也继续重试 connect)
         let add_result = hidden_command("netsh")
@@ -981,12 +978,10 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
         }
 
         // 再次尝试连接（使用 name=）
+        // guard 不显式 drop: 函数返回时 Rust 自动 drop 所有 locals, 触发清理
         let result = hidden_command("netsh")
             .args(["wlan", "connect", &format!("name={}", ssid)])
             .output();
-
-        // 提前 drop 触发清理
-        drop(guard);
 
         match result {
             Ok(output) => {
@@ -1001,6 +996,7 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
             }
             Err(e) => Err(format!("执行连接命令失败: {}", e)),
         }
+        // 函数末尾 guard 自动 drop, 临时文件清理
     }
 
     #[cfg(not(windows))]

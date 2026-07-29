@@ -49,9 +49,17 @@
 1. 下载最新的 `xxgcxy-wifi_x.x.x_x64-setup.exe`
 2. 双击运行，按提示完成安装
 3. 首次运行需配置 WiFi 和账号信息
-4. **依赖**: Windows 10/11 自带 PowerShell 5.1，无需额外安装
 
-> 自 v1.9.0 起不再内置 PowerShell 7 移植版。Windows 自带的 PowerShell 5.1 完整支持 DPAPI `ProtectedData`(.NET 4.x),所有登录逻辑可正常运行。
+**系统要求**:
+- **Windows 10 / 11**: 自带 PowerShell 5.1，**无需任何额外操作**（开箱即用）
+- **Windows 8 / 8.1 / Server 2012-2012R2**: 自带 PowerShell 4.0，需升级到 PowerShell 5.1
+  - 下载 WMF 5.1: <https://www.microsoft.com/en-us/download/details.aspx?id=54616>
+- **Windows 7 SP1 / Server 2008 R2 SP1**: 自带 PowerShell 2.0，**必须**手动安装 WMF 5.1
+  - 下载 WMF 5.1: <https://www.microsoft.com/en-us/download/details.aspx?id=54616>
+  - 安装后重启
+- **Windows XP / Vista / Server 2003/2008**: **不支持**（太老）
+
+> 自 v1.9.0 起不再内置 PowerShell 7 移植版。Windows 自带的 PowerShell 5.1+ 完整支持 DPAPI `ProtectedData`（.NET Framework 4.x），所有登录逻辑可正常运行。脚本已做 Win 7/8 兼容（WMI fallback 处理 Get-NetAdapter 不存在的问题）。
 
 ### Linux
 

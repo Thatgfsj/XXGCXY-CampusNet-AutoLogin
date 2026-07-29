@@ -17,6 +17,24 @@
 $OutputEncoding = [System.Text.Encoding]::UTF8
 chcp 65001 | Out-Null
 
+# ============= PS 版本检查 =============
+# 我们依赖 PowerShell 5.1+ (Windows 10/11 自带; Win 7 需装 WMF 5.1)
+# 关键 API: ProtectedData (.NET 4.0+), Get-WmiObject (Win NT 4.0+),
+#          Invoke-WebRequest (PS 3.0+), ConvertFrom-Json (PS 3.0+)
+
+if ($PSVersionTable.PSVersion.Major -lt 5) {
+    Write-Host "[!] 需要 PowerShell 5.1 或更高版本, 当前是 $($PSVersionTable.PSVersion)" -ForegroundColor Red
+    Write-Host "    Windows 7/8 用户需要手动安装 WMF 5.1:" -ForegroundColor Yellow
+    Write-Host "      https://www.microsoft.com/en-us/download/details.aspx?id=54616" -ForegroundColor Yellow
+    exit 1
+}
+if ($PSVersionTable.PSVersion.Major -eq 5 -and $PSVersionTable.PSVersion.Minor -lt 1) {
+    Write-Host "[!] 需要 PowerShell 5.1 或更高版本, 当前是 $($PSVersionTable.PSVersion)" -ForegroundColor Red
+    Write-Host "    Windows 7/8 用户需要手动安装 WMF 5.1:" -ForegroundColor Yellow
+    Write-Host "      https://www.microsoft.com/en-us/download/details.aspx?id=54616" -ForegroundColor Yellow
+    exit 1
+}
+
 # ============= 路径 =============
 
 $AppDataDir = Join-Path $env:APPDATA "xxgcxy-wifi"
@@ -68,10 +86,14 @@ function Load-LoginProfile {
     }
     try {
         $content = Get-Content -Path $ProfilePath -Raw -Encoding UTF8 -ErrorAction Stop
-        if ([string]::IsNullOrWhiteSpace($content)) { return $null }
+        if ([string]::IsNullOrWhiteSpace($content)) {
+            Write-Host "[!] 登录配置文件为空: $ProfilePath" -ForegroundColor Red
+            Write-Host "    请在 UI 中重新保存配置。" -ForegroundColor Yellow
+            return $null
+        }
         $json = $content | ConvertFrom-Json -ErrorAction Stop
 
-        $required = @("user_id", "operator", "base_url", "vlan", "mac_address")
+        $required = @("user_id", "operator", "base_url", "vlan", "mac_address", "ssid", "wlan_ac_name", "wlan_ac_ip")
         # wlan_user_ip 是可选的,运行时由 Get-WifiIpAddress() 自动取本地 IP 兜底
         foreach ($f in $required) {
             if (-not $json.PSObject.Properties.Name.Contains($f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
@@ -115,40 +137,120 @@ function Get-LoginPassword {
         return $text.TrimEnd("`0")
     } catch {
         Write-Host "[!] 解密密码失败: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "    可能原因: credential 文件损坏 / 密码是另一台电脑/账号加密的" -ForegroundColor Yellow
+        Write-Host "    解决: 在 UI 中重新保存配置" -ForegroundColor Yellow
         return $null
     }
 }
 
-# ============= 网络接口 =============
+# ============= 网络接口 (Win 8+ / Win 7 兼容) =============
+# Get-NetAdapter / Get-NetIPAddress 是 Win 8+ 才有, Win 7 必须 fallback
+# Win 7 用 WMI Win32_NetworkAdapter (Win 95+ 都有, 最稳)
+# 注意: 我们的代码优先用 Get-NetAdapter (Win 8+), 不行才 fallback
 
-function Get-WirelessMacAddress {
-    try {
-        $ad = Get-NetAdapter | Where-Object {
-            ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
-            $_.Status -eq 'Up' -and
-            $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
-        } | Select-Object -First 1
-        if ($ad) {
-            $mac = ($ad.MacAddress -replace '[-:]', ':').ToLower()
-            if ($mac -notmatch '^([0-9a-f]{2}:){5}[0-9a-f]{2}$') {
-                $mac = ($ad.MacAddress -replace '[-.]', ':').ToLower()
-            }
-            return $mac
+# 检测 NetAdapter module 是否可用
+$script:HasNetAdapterModule = $null
+function Test-NetAdapterModule {
+    if ($null -eq $script:HasNetAdapterModule) {
+        try {
+            $null = Get-Command Get-NetAdapter -ErrorAction Stop
+            $script:HasNetAdapterModule = $true
+        } catch {
+            $script:HasNetAdapterModule = $false
         }
+    }
+    return $script:HasNetAdapterModule
+}
+
+# 检测 NetTCPIP module 是否可用 (Win 8+)
+$script:HasNetTCPIPModule = $null
+function Test-NetTCPIPModule {
+    if ($null -eq $script:HasNetTCPIPModule) {
+        try {
+            $null = Get-Command Get-NetIPAddress -ErrorAction Stop
+            $script:HasNetTCPIPModule = $true
+        } catch {
+            $script:HasNetTCPIPModule = $false
+        }
+    }
+    return $script:HasNetTCPIPModule
+}
+
+# 找"正在 Up 状态的 WiFi/无线网卡" - 优先用 Get-NetAdapter, fallback 到 WMI
+function Get-WirelessAdapter {
+    # 路径 1: Win 8+ Get-NetAdapter
+    if (Test-NetAdapterModule) {
+        try {
+            $ad = Get-NetAdapter | Where-Object {
+                ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN|802\.11') -and
+                $_.Status -eq 'Up' -and
+                $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
+            } | Select-Object -First 1
+            if ($ad) { return $ad }
+        } catch {}
+    }
+    # 路径 2: Win 7+ WMI Win32_NetworkAdapter (Win 95+ 都有, 最稳)
+    try {
+        # WMI 在 PS 5.1 都能用, CIM 在 PS 6+ 才有
+        $wmi = Get-WmiObject Win32_NetworkAdapter |
+            Where-Object {
+                $_.NetEnabled -eq $true -and
+                ($_.Name -match 'Wi-Fi|Wireless|WLAN|802\.11') -and
+                $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
+            } | Select-Object -First 1
+        if ($wmi) { return $wmi }
     } catch {}
     return $null
 }
 
+function Get-WirelessMacAddress {
+    $ad = Get-WirelessAdapter
+    if ($null -eq $ad) { return $null }
+    # Get-NetAdapter 用 .MacAddress, WMI 用 .MACAddress (大写)
+    $raw = $ad.MACAddress
+    if ([string]::IsNullOrEmpty($raw)) { $raw = $ad.MacAddress }
+    if ([string]::IsNullOrEmpty($raw)) { return $null }
+    # 标准化为小写冒号分隔 (aa:bb:cc:dd:ee:ff)
+    $mac = ($raw -replace '[-]', ':').ToLower()
+    if ($mac -notmatch '^([0-9a-f]{2}:){5}[0-9a-f]{2}$') {
+        $mac = ($raw -replace '[-.]', ':').ToLower()
+    }
+    return $mac
+}
+
 function Get-WifiIpAddress {
-    try {
-        $ad = Get-NetAdapter | Where-Object {
-            ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
-            $_.Status -eq 'Up' -and
-            $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
-        } | Select-Object -First 1
-        if ($ad) {
+    $ad = Get-WirelessAdapter
+    if ($null -eq $ad) { return $null }
+    # 路径 1: Win 8+ Get-NetIPAddress (如果有 IfIndex 字段)
+    if (Test-NetTCPIPModule -and $ad.PSObject.Properties.Name -contains 'IfIndex') {
+        try {
             $ip = Get-NetIPAddress -InterfaceIndex $ad.IfIndex -AddressFamily IPv4 -ErrorAction Stop
-            return $ip.IPAddress
+            if ($ip) { return $ip.IPAddress }
+        } catch {}
+    }
+    # 路径 2: WMI Win32_NetworkAdapterConfiguration (Win NT 4.0+ 都有)
+    try {
+        $idx = $null
+        if ($ad.PSObject.Properties.Name -contains 'Index') { $idx = $ad.Index }
+        elseif ($ad.PSObject.Properties.Name -contains 'InterfaceIndex') { $idx = $ad.InterfaceIndex }
+        if ($null -ne $idx) {
+            $cfg = Get-WmiObject Win32_NetworkAdapterConfiguration |
+                Where-Object { $_.Index -eq $idx }
+            if ($cfg -and $cfg.IPAddress) {
+                # WMI IPAddress 是字符串数组, 取第一个 IPv4
+                foreach ($ip in $cfg.IPAddress) {
+                    if ($ip -match '^\d+\.\d+\.\d+\.\d+$') { return $ip }
+                }
+            }
+        }
+    } catch {}
+    # 路径 3: 兜底 ipconfig
+    try {
+        $ipconfig = ipconfig
+        $line = $ipconfig | Select-String -Pattern 'IPv4'
+        if ($line) {
+            $match = [regex]::Match($line.ToString(), '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})')
+            if ($match.Success) { return $match.Groups[1].Value }
         }
     } catch {}
     return $null
@@ -169,11 +271,8 @@ function Is-SsidConnected {
     if ([string]::IsNullOrEmpty($targetSsid)) { return $true }
     $current = Get-CurrentSsid
     if ($current -eq $targetSsid) {
-        $adapter = Get-NetAdapter | Where-Object {
-            ($_.InterfaceDescription -match 'Wi-Fi|Wireless|WLAN') -and
-            $_.Status -eq 'Up' -and
-            $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
-        } | Select-Object -First 1
+        # 复用 Get-WirelessAdapter (Win 8+ / Win 7 WMI fallback)
+        $adapter = Get-WirelessAdapter
         return ($null -ne $adapter)
     }
     return $false
