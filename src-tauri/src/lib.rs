@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem};
@@ -503,8 +502,7 @@ async fn run_login_with_profile(app: AppHandle) -> Result<String, String> {
 
 #[cfg(windows)]
 fn encrypt_password(plain: &str) -> Result<Vec<u8>, String> {
-    use windows::Win32::Security::Cryptography::CryptProtectData;
-    use windows::Win32::Security::CRYPT_INTEGER_BLOB;
+    use windows::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
     use windows::Win32::Foundation::{HLOCAL, LocalFree};
 
     // 链路:plaintext -> UTF-16 LE 字节 -> CryptProtectData (DPAPI, 无 entropy)
@@ -790,7 +788,7 @@ async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
 
     #[cfg(not(windows))]
     {
-        let output = Command::new("nmcli")
+        let output = std::process::Command::new("nmcli")
             .args(["-t", "-m", "multiline", "device", "wifi", "list", "--rescan", "yes"])
             .output()
             .map_err(|e| format!("执行扫描命令失败: {}", e))?;
@@ -946,7 +944,7 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
 
     #[cfg(not(windows))]
     {
-        let output = Command::new("nmcli")
+        let output = std::process::Command::new("nmcli")
             .args(["device", "wifi", "connect", &ssid])
             .output()
             .map_err(|e| format!("执行连接命令失败: {}", e))?;
@@ -987,7 +985,7 @@ fn get_connected_wifi() -> Option<String> {
 
     #[cfg(not(windows))]
     {
-        let output = Command::new("nmcli")
+        let output = std::process::Command::new("nmcli")
             .args(["-t", "-m", "multiline", "device", "show"])
             .output()
             .ok()?;
