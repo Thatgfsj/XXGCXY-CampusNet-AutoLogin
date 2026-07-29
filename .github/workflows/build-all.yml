@@ -31,8 +31,17 @@ jobs:
           Remove-Item src-tauri/bin/_pw7_ -Recurse -Force -ErrorAction SilentlyContinue
           # Restore real _pw7_ binaries from LFS checkout
           Move-Item ../_pw7_backup src-tauri/bin/_pw7_
-          # Verify real binaries
+          # 显式 re-smudge LFS pointer (v1.9.0 起必要的:之前 Move-Item 后 git lfs
+          # 不知道哪些文件是 LFS pointer, 不会自动替换为真实二进制)
+          git lfs checkout -- src-tauri/bin/_pw7_ 2>&1 | Out-String | Write-Host
+          # 双重保险: 如果还是 134 字节 (说明 LFS object 没拉下来), 强制拉
           $pwsh = Get-Item src-tauri/bin/_pw7_/pwsh.exe -ErrorAction SilentlyContinue
+          if ($pwsh.Length -lt 1000) {
+              Write-Host "[WARN] pwsh.exe still LFS pointer ($($pwsh.Length) bytes), 强制 git lfs pull..."
+              git lfs pull origin win-portable 2>&1 | Out-String | Write-Host
+              $pwsh = Get-Item src-tauri/bin/_pw7_/pwsh.exe -ErrorAction SilentlyContinue
+          }
+          # Verify real binaries
           Write-Host "pwsh.exe size: $($pwsh.Length) bytes"
           $totalSize = (Get-ChildItem -Recurse src-tauri/bin/_pw7_/ | Measure-Object -Property Length -Sum).Sum
           Write-Host "_pw7_ total size: $([math]::Round($totalSize / 1MB, 2)) MB"
