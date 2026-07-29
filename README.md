@@ -1,6 +1,6 @@
 # XXGCXY-CampusNet-AutoLogin
 
-新乡工程学院校园网自动登录助手 —— 基于 Tauri 2.x 的 Windows 桌面应用，自动检测 / 重连校园网 WiFi 并完成 Portal 认证登录。
+新乡工程学院校园网自动登录助手 —— 基于 Tauri 2.x 的 Windows / Linux 桌面应用，自动检测 / 重连校园网 WiFi 并完成 Portal 认证登录。
 
 > 校园网认证机制详解讲解（感兴趣的话推荐查看）：[AUTH_MECHANISM.md](./AUTH_MECHANISM.md)
 >
@@ -24,11 +24,12 @@
 
 **GitHub Releases**: [最新版本](https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin/releases)
 
-| 版本 | 说明 | 内置 PS7 | 需要系统 PS7 |
+| 版本 | 说明 | 内置 PS7 | 需要系统 PS 5.1+ |
 |------|------|:---------:|:-------------:|
-| **内置 PS7 版** | Windows 便携版，开箱即用 | ✅ | ❌ |
-| **系统 PS7 版** | Windows 版，需系统已安装 PS7 | ❌ | ✅ |
-| **Linux 版** | 纯 Sh 脚本 | 👻 | 👻 |
+| **Windows NSIS / MSI** | Windows 安装器，体积小 | ❌ | ✅ |
+| **Linux** | .deb / .rpm / tar.gz | 👻 | 👻 |
+
+> v1.9.0+ 起不再内置 PowerShell 7 移植版。Windows 10/11 自带 PowerShell 5.1，已支持 DPAPI 加密。
 
 ## 功能
 
@@ -48,9 +49,9 @@
 1. 下载最新的 `xxgcxy-wifi_x.x.x_x64-setup.exe`
 2. 双击运行，按提示完成安装
 3. 首次运行需配置 WiFi 和账号信息
+4. **依赖**: Windows 10/11 自带 PowerShell 5.1，无需额外安装
 
-> **内置 PS7 版** 已自带 PowerShell 7，无需额外安装。
-> **系统 PS7 版** 需系统已安装 [PowerShell 7](https://github.com/PowerShell/PowerShell)。
+> 自 v1.9.0 起不再内置 PowerShell 7 移植版。Windows 自带的 PowerShell 5.1 完整支持 DPAPI `ProtectedData`(.NET 4.x),所有登录逻辑可正常运行。
 
 ### Linux
 
@@ -66,8 +67,8 @@ sudo dnf install powershell   # Fedora
 ```
 ├── index.html              # 前端界面 (HTML/CSS/JS)
 ├── package.json            # Node.js 依赖
-├── xywdl.ps1               # 校园网认证脚本 (PowerShell 类实现)
-├── xywdl.bat               # Windows 启动器
+├── xywdl.ps1               # 校园网认证脚本 (PowerShell)
+├── xywdl.bat               # Windows 启动器（找系统 pwsh / powershell）
 ├── xywdl.sh                # Linux 启动脚本
 ├── AUTH_MECHANISM.md       # 校园网认证机制详解
 ├── JSDOC.md                # 项目技术文档（含 API、架构、问题修复史）

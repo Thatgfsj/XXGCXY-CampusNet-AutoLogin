@@ -8,109 +8,11 @@ permissions:
 
 jobs:
   # ============================================
-  # Windows + 内置 PS7 (包含 _pw7_ 目录)
+  # Windows (依赖系统 PowerShell 5.1+, 不再内置 PS7)
+  # v1.9.0+ 重大变更: LFS object 丢失, 取消内置 PowerShell 7 便携版
+  # Windows 10/11 自带 PS 5.1, DPAPI ProtectedData 在 .NET 4.x 可用
   # ============================================
-  build-win-portable:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout win-portable branch (LFS smudges _pw7_ binaries)
-        uses: actions/checkout@v4
-        with:
-          ref: win-portable
-          lfs: true
-
-      - name: Sync non-_pw7_ files from main, restore _pw7_ from LFS checkout
-        shell: pwsh
-        run: |
-          # Save _pw7_ (binaries from LFS-smudged win-portable checkout)
-          Move-Item src-tauri/bin/_pw7_ ../_pw7_backup -Force
-          # Fetch main and overwrite working tree with main's files
-          git fetch origin main --depth=1
-          git checkout origin/main -- .
-          # Remove any _pw7_ that came from main (doesn't have it)
-          Remove-Item src-tauri/bin/_pw7_ -Recurse -Force -ErrorAction SilentlyContinue
-          # Restore real _pw7_ binaries from LFS checkout
-          Move-Item ../_pw7_backup src-tauri/bin/_pw7_
-          # 显式 re-smudge LFS pointer (v1.9.0 起必要的:之前 Move-Item 后 git lfs
-          # 不知道哪些文件是 LFS pointer, 不会自动替换为真实二进制)
-          git lfs checkout -- src-tauri/bin/_pw7_ 2>&1 | Out-String | Write-Host
-          # 双重保险: 如果还是 134 字节 (说明 LFS object 没拉下来), 强制拉
-          $pwsh = Get-Item src-tauri/bin/_pw7_/pwsh.exe -ErrorAction SilentlyContinue
-          if ($pwsh.Length -lt 1000) {
-              Write-Host "[WARN] pwsh.exe still LFS pointer ($($pwsh.Length) bytes), 强制 git lfs pull..."
-              git lfs pull origin win-portable 2>&1 | Out-String | Write-Host
-              $pwsh = Get-Item src-tauri/bin/_pw7_/pwsh.exe -ErrorAction SilentlyContinue
-          }
-          # Verify real binaries
-          Write-Host "pwsh.exe size: $($pwsh.Length) bytes"
-          $totalSize = (Get-ChildItem -Recurse src-tauri/bin/_pw7_/ | Measure-Object -Property Length -Sum).Sum
-          Write-Host "_pw7_ total size: $([math]::Round($totalSize / 1MB, 2)) MB"
-
-      - name: Add _pw7_ to tauri.conf.json (specific files)
-        shell: pwsh
-        run: |
-          $confPath = Join-Path $env:GITHUB_WORKSPACE "src-tauri/tauri.conf.json"
-          $content = Get-Content $confPath -Raw -Encoding UTF8
-          # Add individual files instead of ** glob - Tauri glob might fail with ** on these
-          $pw7Files = @(
-            '"bin/_pw7_/pwsh.exe"',
-            '"bin/_pw7_/pwsh.dll"',
-            '"bin/_pw7_/coreclr.dll"',
-            '"bin/_pw7_/*"'   # also try * as fallback
-          )
-          $replaceWith = '"bin/WebView2Loader.dll", ' + ($pw7Files -join ', ')
-          $content = $content.Replace('"bin/WebView2Loader.dll"', $replaceWith)
-          [System.IO.File]::WriteAllText($confPath, $content, [System.Text.UTF8Encoding]::new($false))
-          $check = Get-Content $confPath -Raw -Encoding UTF8
-          Write-Host "SUCCESS: resources updated"
-          # Show the resources section (multiline)
-          $match = [regex]::Match($check, '"resources".*\[.*?\]', 'Singleline')
-          if ($match.Success) { Write-Host $match.Value }
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install deps
-        run: npm ci
-
-      - name: Verify _pw7_ + config before build
-        shell: pwsh
-        run: |
-          Write-Host "Working dir: $pwd"
-          Write-Host "Does _pw7_ exist?: $(Test-Path src-tauri/bin/_pw7_)"
-          Write-Host "Does pwsh.exe exist?: $(Test-Path src-tauri/bin/_pw7_/pwsh.exe)"
-          Write-Host ""
-          Write-Host "=== RESOURCES in tauri.conf.json ==="
-          $raw = Get-Content "src-tauri/tauri.conf.json" -Raw -Encoding UTF8
-          $match = [regex]::Match($raw, '"resources".*\[.*?\]', 'Singleline')
-          if ($match.Success) { Write-Host $match.Value } else { Write-Host "REGEX FAILED - dumping raw:"; $raw | Out-String | Write-Host }
-          Write-Host ""
-          Write-Host "File contains _pw7_: $($raw.Contains('_pw7_'))"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build Tauri
-        run: npx @tauri-apps/cli build
-
-      - name: Upload NSIS
-        uses: actions/upload-artifact@v4
-        with:
-          name: win-portable-nsis
-          path: src-tauri/target/release/bundle/nsis/*.exe
-
-      - name: Upload MSI
-        uses: actions/upload-artifact@v4
-        with:
-          name: win-portable-msi
-          path: src-tauri/target/release/bundle/msi/*.msi
-
-  # ============================================
-  # Windows + 系统 PS7 (移除 _pw7_ 目录)
-  # ============================================
-  build-win-system:
+  build-windows:
     runs-on: windows-latest
     steps:
       - name: Checkout main
@@ -129,7 +31,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Remove _pw7_ directory (system PS7 mode)
+      - name: Remove _pw7_ directory if present (历史残留)
         shell: pwsh
         run: |
           $pw7Paths = @(
@@ -139,7 +41,7 @@ jobs:
           foreach ($p in $pw7Paths) {
             if (Test-Path $p) {
               Remove-Item -Recurse -Force $p
-              Write-Host "Removed: $p"
+              Write-Host "Removed legacy: $p"
             }
           }
 
@@ -149,13 +51,13 @@ jobs:
       - name: Upload NSIS
         uses: actions/upload-artifact@v4
         with:
-          name: win-system-nsis
+          name: windows-nsis
           path: src-tauri/target/release/bundle/nsis/*.exe
 
       - name: Upload MSI
         uses: actions/upload-artifact@v4
         with:
-          name: win-system-msi
+          name: windows-msi
           path: src-tauri/target/release/bundle/msi/*.msi
 
   # ============================================
@@ -291,32 +193,20 @@ jobs:
   # v1.9.0 调试阶段临时禁用,只跑构建,回头手动发布
   release:
     if: ${{ false }}  # v1.9.0 临时禁掉, 改回 true 再发布
-    needs: [build-win-portable, build-win-system, build-linux, build-standalone-sh]
+    needs: [build-windows, build-linux, build-standalone-sh]
     runs-on: ubuntu-latest
     steps:
-      - name: Download win-portable NSIS
+      - name: Download Windows NSIS
         uses: actions/download-artifact@v4
         with:
-          name: win-portable-nsis
-          path: artifacts/win-portable
+          name: windows-nsis
+          path: artifacts/windows
 
-      - name: Download win-portable MSI
+      - name: Download Windows MSI
         uses: actions/download-artifact@v4
         with:
-          name: win-portable-msi
-          path: artifacts/win-portable
-
-      - name: Download win-system NSIS
-        uses: actions/download-artifact@v4
-        with:
-          name: win-system-nsis
-          path: artifacts/win-system
-
-      - name: Download win-system MSI
-        uses: actions/download-artifact@v4
-        with:
-          name: win-system-msi
-          path: artifacts/win-system
+          name: windows-msi
+          path: artifacts/windows
 
       - name: Download Linux deb
         uses: actions/download-artifact@v4
@@ -342,12 +232,6 @@ jobs:
           name: standalone-sh
           path: artifacts/standalone-sh
 
-      - name: Rename win-system artifacts
-        run: |
-          cd artifacts/win-system
-          for f in *.exe; do mv "$f" "${f%.exe}_no-ps7.exe"; done
-          for f in *.msi; do mv "$f" "${f%.msi}_no-ps7.msi"; done
-
       - name: List artifacts
         run: |
           echo "=== Artifacts ==="
@@ -363,13 +247,9 @@ jobs:
 
             ## Download
 
-            **Windows (Built-in PS7, no manual PS7 install needed)**
-            - `xxgcxy-wifi_1.9.0_x64-setup.exe` - NSIS installer
-            - `xxgcxy-wifi_1.9.0_x64_zh-CN.msi` - MSI installer
-
-            **Windows (System PS7 required)**
-            - `xxgcxy-wifi_1.9.0_x64-setup_no-ps7.exe` - NSIS installer
-            - `xxgcxy-wifi_1.9.0_x64_zh-CN_no-ps7.msi` - MSI installer
+            **Windows (系统 PowerShell 5.1+, 体积小)**
+            - `xxgcxy-wifi_1.9.0_x64-setup.exe` - NSIS installer (~5 MB)
+            - `xxgcxy-wifi_1.9.0_x64_zh-CN.msi` - MSI installer (~6 MB)
 
             **Linux**
             - `xxgcxy-wifi_1.9.0_amd64.deb` - Debian/Ubuntu package
