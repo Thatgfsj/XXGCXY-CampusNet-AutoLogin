@@ -3,6 +3,8 @@
 新乡工程学院校园网自动登录助手 —— 基于 Tauri 2.x 的 Windows 桌面应用，自动检测 / 重连校园网 WiFi 并完成 Portal 认证登录。
 
 > 校园网认证机制详解讲解（感兴趣的话推荐查看）：[AUTH_MECHANISM.md](./AUTH_MECHANISM.md)
+>
+> 开发者文档（API、架构、问题修复史）：[JSDOC.md](./JSDOC.md)
 
 ## 技术栈
 
@@ -66,7 +68,8 @@ sudo dnf install powershell   # Fedora
 ├── xywdl.ps1               # 校园网认证脚本 (PowerShell 类实现)
 ├── xywdl.bat               # Windows 启动器
 ├── xywdl.sh                # Linux 启动脚本
-├── AUTH_MECHANISM.md       # 认证机制详解文档
+├── AUTH_MECHANISM.md       # 校园网认证机制详解
+├── JSDOC.md                # 项目技术文档（含 API、架构、问题修复史）
 ├── src-tauri/              # Tauri 后端 (Rust)
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
