@@ -366,6 +366,18 @@ fn save_login_profile(profile: LoginProfile, password: String) -> Result<(), Str
     Ok(())
 }
 
+/// 清除登录配置 + 加密密码 + 旧版残留文件
+#[tauri::command]
+fn clear_login_profile() -> Result<(), String> {
+    // 复用 clear_campus_net_info 的清理逻辑(逻辑已迁移到那里)
+    let _ = fs::remove_file(get_login_profile_path());
+    let _ = fs::remove_file(get_login_credential_path());
+    for legacy in get_legacy_campus_config_candidates() {
+        let _ = fs::remove_file(legacy);
+    }
+    Ok(())
+}
+
 /// 解析 portal.do 重定向 URL (替代旧 PS 端的 TryAutoDetectParams)
 /// 用户从浏览器复制粘贴的 URL 进来,我们用跟 PS 端 RedirectUrlParser 一样的正则解析。
 #[tauri::command]
@@ -548,9 +560,9 @@ fn encrypt_password(plain: &str) -> Result<Vec<u8>, String> {
 
 #[cfg(not(windows))]
 fn encrypt_password(plain: &str) -> Result<Vec<u8>, String> {
-    // Linux 临时实现:明文存 + 文件权限 0600
-    // 后续可换 libsecret / keyring
-    use std::os::unix::fs::OpenOptionsExt;
+    // Linux 临时实现:明文存(后续可换 libsecret / keyring)
+    // 注意:写文件时用 OpenOptionsExt 设权限 0600 在 save_login_profile 的 fs::write 处不可控,
+    // 这里仅返回字节,具体落盘策略由调用方负责。
     Ok(plain.as_bytes().to_vec())
 }
 
