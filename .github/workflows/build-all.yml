@@ -279,7 +279,9 @@ jobs:
   # ============================================
   # 创建统一 Release
   # ============================================
+  # v1.9.0 调试阶段临时禁用,只跑构建,回头手动发布
   release:
+    if: ${{ false }}  # v1.9.0 临时禁掉, 改回 true 再发布
     needs: [build-win-portable, build-win-system, build-linux, build-standalone-sh]
     runs-on: ubuntu-latest
     steps:
@@ -345,47 +347,39 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.8.3
-          name: v1.8.3 - xiaoyuanwangluo zidong denglu zhushou
+          tag_name: v1.9.0
+          name: v1.9.0 - xiaoyuanwangluo zidong denglu zhushou
           body: |
-            v1.8.3 - xiaoyuanwangluo zidong denglu zhushou
+            v1.9.0 - xiaoyuanwangluo zidong denglu zhushou (TBD, 待写)
 
             ## Download
 
             **Windows (Built-in PS7, no manual PS7 install needed)**
-            - `xxgcxy-wifi_1.8.3_x64-setup.exe` - NSIS installer
-            - `xxgcxy-wifi_1.8.3_x64_zh-CN.msi` - MSI installer
+            - `xxgcxy-wifi_1.9.0_x64-setup.exe` - NSIS installer
+            - `xxgcxy-wifi_1.9.0_x64_zh-CN.msi` - MSI installer
 
             **Windows (System PS7 required)**
-            - `xxgcxy-wifi_1.8.3_x64-setup_no-ps7.exe` - NSIS installer
-            - `xxgcxy-wifi_1.8.3_x64_zh-CN_no-ps7.msi` - MSI installer
+            - `xxgcxy-wifi_1.9.0_x64-setup_no-ps7.exe` - NSIS installer
+            - `xxgcxy-wifi_1.9.0_x64_zh-CN_no-ps7.msi` - MSI installer
 
             **Linux**
-            - `xxgcxy-wifi_1.8.3_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v1.8.3-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-1.8.3-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_1.9.0_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v1.9.0-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-1.9.0-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs pwsh)
 
-            ## Changelog v1.8.3
-            - Fix: 校园网信息读取同时支持 xywdl.ps1 的 APPDATA 路径与 xywdl.sh 的 `~/.config/xxgcxy-wifi/login_config.json` 路径
-            - Fix: xywdl.bat 顶部加 `chcp 65001 >nul`,修复 GBK 系统下中文 echo 乱码
-            - Fix: xywdl.bat / xywdl.ps1 加 UTF-8 BOM,PowerShell 5 兼容性
-            - Chore: 版本号 bump 至 1.8.3
-
-            ## Changelog v1.8.2
-            - Feat: 在"网络配置"窗口展示校园网信息(学号/运营商)
-            - Feat: 增加"清理校园网信息"按钮,一键删除 `%APPDATA%/xxgc_campus_net_config.txt`
-            - Feat: 新增 Tauri 命令 `load_campus_net_info` / `clear_campus_net_info`
-
-            ## Changelog v1.8.1
-            - Fix: bat quoting crash when running login script from tray
-            - Fix: tray menu reorder - 立即检测 second, 手动连接 third
-            - Fix: 手动连接 now does WiFi connect with signal comparison (no auto-login)
-            - Fix: 执行登录脚本 now runs directly, bypasses all safety checks
-            - Fix: Linux run_login_script missing --non-interactive flag
-            - Chore: add comprehensive TECHNICAL_DOC.md
+            ## Changelog v1.9.0 (TBD)
+            - Feat: 登录模块解耦,可视化配置 (运营商/学号/密码/Portal URL)
+            - Feat: 首次启动自动弹出登录配置屏
+            - Feat: 主页"登录（更换）"按钮
+            - Feat: 网络配置页"更改账号信息"按钮
+            - Feat: Portal URL 一键解析自动填充 SSID/AC/VLAN/MAC
+            - Refactor: xywdl.ps1 从 604 行简化到 280 行,移除交互式 Read-Host 和自动检测
+            - Refactor: 配置从硬编码改为 JSON 模板 (login_profile.json)
+            - Security: 密码用 Windows DPAPI 加密 (login_credential.bin)
+            - Breaking: 不兼容旧 %APPDATA%/xxgc_campus_net_config.txt
           files: |
             artifacts/win-portable/*.exe
             artifacts/win-portable/*.msi
