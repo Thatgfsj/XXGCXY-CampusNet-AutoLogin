@@ -1417,14 +1417,30 @@
                 }
             } catch (e) {
                 addLog('扫描WiFi失败: ' + e);
-                document.getElementById('wifiList').innerHTML =
-                    '<div style="padding: 20px; text-align: center; color: #b91c1c;">'
-                    + '<strong>扫描失败</strong><br><br>'
-                    + '<span style="font-size: 12px; color: #666; word-break: break-all;">'
-                    + String(e).replace(/</g, '&lt;') + '</span><br><br>'
-                    + '<span style="font-size: 11px; color: #888;">可能原因: 电脑没有 WiFi 网卡 / 无线网卡被禁用 / 权限不足<br>'
-                    + '可手动运行 <code>netsh wlan show networks mode=bssid</code> 验证</span>'
-                    + '</div>';
+                const list = document.getElementById('wifiList');
+                while (list.firstChild) list.removeChild(list.firstChild);
+                const div = document.createElement('div');
+                div.style.cssText = 'padding: 20px; text-align: center; color: #b91c1c;';
+                const strong = document.createElement('strong');
+                strong.textContent = '扫描失败';
+                const br1 = document.createElement('br');
+                const br2 = document.createElement('br');
+                const detail = document.createElement('span');
+                detail.style.cssText = 'font-size: 12px; color: #666; word-break: break-all;';
+                detail.textContent = String(e);  // textContent 防 XSS
+                const hint = document.createElement('span');
+                hint.style.cssText = 'font-size: 11px; color: #888; display: block; margin-top: 8px;';
+                hint.textContent = '可能原因: 电脑没有 WiFi 网卡 / 无线网卡被禁用 / 权限不足';
+                const hint2 = document.createElement('span');
+                hint2.style.cssText = 'font-size: 11px; color: #888; display: block;';
+                hint2.textContent = '可手动运行: netsh wlan show networks mode=bssid 验证';
+                div.appendChild(strong);
+                div.appendChild(br1);
+                div.appendChild(br2);
+                div.appendChild(detail);
+                div.appendChild(hint);
+                div.appendChild(hint2);
+                list.appendChild(div);
             }
         }
         
@@ -1433,25 +1449,37 @@
             const list = document.getElementById('wifiList');
             
             if (wifiNetworks.length === 0) {
-                list.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">未找到WiFi网络</div>';
+                while (list.firstChild) list.removeChild(list.firstChild);
+                const div = document.createElement('div');
+                div.style.cssText = 'padding: 20px; text-align: center; color: #666;';
+                div.textContent = '未找到WiFi网络';
+                list.appendChild(div);
                 return;
             }
             
-            let html = '';
+            // 清空 list
+            while (list.firstChild) list.removeChild(list.firstChild);
+
             wifiNetworks.forEach((wifi, index) => {
                 const isPrimary = selectedPrimary === wifi.ssid;
                 const isBackup = selectedBackup === wifi.ssid;
-                const selectedClass = isPrimary || isBackup ? 'selected' : '';
-                
-                html += `
-                    <div class="wifi-item ${selectedClass}" onclick="selectWifi(${index})">
-                        <div class="wifi-name">${wifi.ssid} ${isPrimary ? '(主网络)' : ''} ${isBackup ? '(备用)' : ''}</div>
-                        <div class="wifi-signal">信号强度: ${wifi.signal}%</div>
-                    </div>
-                `;
+                const item = document.createElement('div');
+                item.className = 'wifi-item' + (isPrimary || isBackup ? ' selected' : '');
+                item.onclick = function() { selectWifi(index); };
+
+                const name = document.createElement('div');
+                name.className = 'wifi-name';
+                // 用 textContent 防 XSS (SSID 一般是 ASCII, 但手输可能含 < > &)
+                name.textContent = wifi.ssid + (isPrimary ? ' (主网络)' : '') + (isBackup ? ' (备用)' : '');
+
+                const signal = document.createElement('div');
+                signal.className = 'wifi-signal';
+                signal.textContent = '信号强度: ' + wifi.signal + '%';
+
+                item.appendChild(name);
+                item.appendChild(signal);
+                list.appendChild(item);
             });
-            
-            list.innerHTML = html;
         }
         
         // 选择WiFi

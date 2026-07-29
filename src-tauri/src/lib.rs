@@ -386,10 +386,11 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
     }
 
     // 简化版 URL 解码:用 percent-decoding 的核心规则
+    // 修复: 用 Vec<u8> 收集字节后 UTF-8 整体解码, 而不是按 char 拼 (避免 UTF-8 多字节字符被当成单字节)
     // (注: + 不被转空格,因为 portal.do URL 是 redirect URL,不是 form-data)
     fn url_decode(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
         let bytes = s.as_bytes();
+        let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
         let mut i = 0;
         while i < bytes.len() {
             if bytes[i] == b'%' && i + 2 < bytes.len() {
@@ -397,25 +398,29 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
                     std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00"),
                     16,
                 ) {
-                    out.push(b as char);
+                    out.push(b);
                     i += 3;
                     continue;
                 }
             }
-            out.push(bytes[i] as char);
+            out.push(bytes[i]);
             i += 1;
         }
-        out
+        // 整体 UTF-8 解码, 失败回退 Latin-1 (每个字节 1 char)
+        String::from_utf8(out.clone()).unwrap_or_else(|_| {
+            out.iter().map(|&b| b as char).collect()
+        })
     }
 
     // form-encoded 形式: + 也转空格 (application/x-www-form-urlencoded)
+    // 同样修复 UTF-8 多字节字符处理
     fn url_decode_form(s: &str) -> String {
-        let mut out = String::with_capacity(s.len());
         let bytes = s.as_bytes();
+        let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
         let mut i = 0;
         while i < bytes.len() {
             if bytes[i] == b'+' {
-                out.push(' ');
+                out.push(b' ');
                 i += 1;
                 continue;
             }
@@ -424,14 +429,17 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
                     std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("00"),
                     16,
                 ) {
-                    out.push(b as char);
+                    out.push(b);
                     i += 3;
                     continue;
                 }
             }
-            out.push(bytes[i] as char);
+            out.push(bytes[i]);
             i += 1;
         }
+        String::from_utf8(out.clone()).unwrap_or_else(|_| {
+            out.iter().map(|&b| b as char).collect()
+        })
         out
     }
 
