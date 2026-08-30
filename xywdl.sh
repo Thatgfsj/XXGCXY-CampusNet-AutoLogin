@@ -159,16 +159,19 @@ rm -f /tmp/xywdl_response.txt
 log_info "[*] HTTP $HTTP_CODE: $RESPONSE"
 
 # 判定结果 (跟 PS 端一致)
-if echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*0' \
+# 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
+# "code":1 (账号不存在), "code":440 会被误判成 "code":44 (非法接入)。
+# grep -E 不支持 lookahead, 用 ([^0-9]|$) 达到同样效果。
+if echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*0([^0-9]|$)' \
    || echo "$RESPONSE" | grep -q "success" \
    || echo "$RESPONSE" | grep -q "认证成功"; then
     log_success "[+] 认证成功,已连接到互联网"
     exit 0
-elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*1' \
+elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*1([^0-9]|$)' \
      || echo "$RESPONSE" | grep -q "账号不存在"; then
     log_error "[!] 认证失败:账号不存在"
     exit 1
-elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*44' \
+elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*44([^0-9]|$)' \
      || echo "$RESPONSE" | grep -q "非法接入"; then
     log_error "[!] 认证失败:非法接入"
     exit 44

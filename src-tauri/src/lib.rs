@@ -1439,3 +1439,195 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+// ============= 单元测试 (cargo test --lib) =============
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_portal(
+        url: &str,
+        expect_ok: bool,
+        expected_base: Option<&str>,
+        expected_ssid: Option<&str>,
+        expected_vlan: Option<&str>,
+        expected_mac: Option<&str>,
+    ) {
+        match parse_portal_url(url.to_string()) {
+            Ok(p) => {
+                assert!(expect_ok, "URL 应报错但成功解析: {}", url);
+                if let Some(b) = expected_base {
+                    assert_eq!(p.base_url, b, "base_url 不匹配: {}", url);
+                }
+                if let Some(s) = expected_ssid {
+                    assert_eq!(p.ssid, s, "ssid 不匹配: {}", url);
+                }
+                if let Some(v) = expected_vlan {
+                    assert_eq!(p.vlan, v, "vlan 不匹配: {}", url);
+                }
+                if let Some(m) = expected_mac {
+                    assert_eq!(p.mac_address, m, "mac 不匹配: {}", url);
+                }
+            }
+            Err(e) => {
+                assert!(!expect_ok, "URL 应成功解析但报错: {} -> {}", url, e);
+            }
+        }
+    }
+
+    // ---------- 正常/常规 ----------
+    #[test]
+    fn test_parse_normal() {
+        assert_portal(
+            "http://172.18.252.12:6060/portal.do?wlanuserip=10.0.0.5&wlanacname=XXGC-AC&wlanacIp=172.18.252.1&vlan=100&mac=aa-bb-cc-dd-ee-ff&ssid=XXGC-WiFi&hostname=PC1&rand=0.123",
+            true,
+            Some("http://172.18.252.12:6060/portal.do"),
+            Some("XXGC-WiFi"),
+            Some("100"),
+            Some("aa:bb:cc:dd:ee:ff"),
+        );
+    }
+
+    #[test]
+    fn test_parse_https() {
+        assert_portal(
+            "https://portal.xxgc.edu.cn:8443/portal.do?ssid=ABC&vlan=200",
+            true,
+            Some("https://portal.xxgc.edu.cn:8443/portal.do"),
+            Some("ABC"),
+            Some("200"),
+            None,
+        );
+    }
+
+    // ---------- 边界: 空/无端口/大小写 ----------
+    #[test]
+    fn test_parse_empty_url() {
+        assert_portal("", false, None, None, None, None);
+        assert_portal("   ", false, None, None, None, None);
+    }
+
+    #[test]
+    fn test_parse_no_scheme() {
+        assert_portal("172.18.252.12/portal.do", false, None, None, None, None);
+    }
+
+    #[test]
+    fn test_parse_no_path() {
+        assert_portal("http://172.18.252.12", false, None, None, None, None);
+    }
+
+    #[test]
+    fn test_parse_no_do_suffix() {
+        assert_portal("http://172.18.252.12/login", false, None, None, None, None);
+    }
+
+    #[test]
+    fn test_parse_uppercase_do() {
+        assert_portal(
+            "http://172.18.252.12/PORTAL.DO?ssid=X",
+            true,
+            Some("http://172.18.252.12/PORTAL.DO"),
+            Some("X"),
+            None,
+            None,
+        );
+    }
+
+    // ---------- 边界: 编码 ----------
+    #[test]
+    fn test_parse_utf8_ssid() {
+        // %E6%B5%8B%E8%AF%95 = 测试 (UTF-8 多字节)
+        assert_portal(
+            "http://172.18.252.12/portal.do?ssid=%E6%B5%8B%E8%AF%95WiFi",
+            true,
+            Some("http://172.18.252.12/portal.do"),
+            Some("测试WiFi"),
+            None,
+            None,
+        );
+    }
+
+    #[test]
+    fn test_parse_plus_as_space() {
+        // form-encoded: + 应转空格
+        assert_portal(
+            "http://172.18.252.12/portal.do?ssid=XXGC+WiFi+5G",
+            true,
+            Some("http://172.18.252.12/portal.do"),
+            Some("XXGC WiFi 5G"),
+            None,
+            None,
+        );
+    }
+
+    #[test]
+    fn test_parse_special_chars() {
+        // 值含 & = 等已被编码的字符
+        assert_portal(
+            "http://172.18.252.12/portal.do?ssid=A%26B%3DC&vlan=100",
+            true,
+            Some("http://172.18.252.12/portal.do"),
+            Some("A&B=C"),
+            Some("100"),
+            None,
+        );
+    }
+
+    // ---------- 边界: 超长/空值/重复 key ----------
+    #[test]
+    fn test_parse_empty_value() {
+        assert_portal(
+            "http://172.18.252.12/portal.do?ssid=&vlan=",
+            true,
+            Some("http://172.18.252.12/portal.do"),
+            Some(""),
+            Some(""),
+            None,
+        );
+    }
+
+    #[test]
+    fn test_parse_duplicate_key_last_wins() {
+        assert_portal(
+            "http://172.18.252.12/portal.do?ssid=first&ssid=second",
+            true,
+            Some("http://172.18.252.12/portal.do"),
+            Some("second"),
+            None,
+            None,
+        );
+    }
+
+    #[test]
+    fn test_parse_query_before_do_in_ssid() {
+        // SSID 值里含 ? 不应截断 query 解析 (取第一个 ? 之前为 base)
+        // 这里 SSID 中编码了 %3F (即 ?), 不应影响 base_url 提取
+        assert_portal(
+            "http://172.18.252.12/portal.do?ssid=AB%3FCD",
+            true,
+            Some("http://172.18.252.12/portal.do"),
+            Some("AB?CD"),
+            None,
+            None,
+        );
+    }
+
+    // ---------- 稳定性: 大量 URL 不 panic ----------
+    #[test]
+    fn test_parse_stress_no_panic() {
+        let samples = [
+            "http://a.b/portal.do?a=1".to_string(),
+            "http://a.b/portal.do?ssid=%E6%B5%8B".to_string(), // 截断的 UTF-8
+            "http://a.b/portal.do?ssid=%ZZ".to_string(),        // 非法 hex
+            "http://a.b/portal.do?x=100%25".to_string(),
+            "http://a.b/portal.do?".to_owned() + &"y=".repeat(5000), // 超长 query
+            "file:///etc/passwd".to_string(),
+            "http://x/portal.do?a=b&c".to_string(),
+        ];
+        for s in &samples {
+            let _ = parse_portal_url(s.clone());
+        }
+    }
+}

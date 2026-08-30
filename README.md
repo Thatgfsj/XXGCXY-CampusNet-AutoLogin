@@ -117,6 +117,11 @@ npx @tauri-apps/cli build
 | `win-system-ps7` | Windows 版（需系统 PS7） |
 | `linux-sh` | Linux 纯脚本版 |
 
+## 更新日志
+
+- **v1.9.1**：修复认证结果判定正则误匹配（`code:10/100/123` 被误判为“账号不存在”、`code:440` 被误判为“非法接入”）、请求日志脱敏密码（`passwd=***`）、统一 PS 端参数 URL 编码；新增自动化测试套件（`tests/`）与 Rust 单元测试。详见 [JSDOC.md §9](JSDOC.md)。
+- **v1.9.0**：登录模块解耦为 JSON 模板 + 渲染器；可视化登录配置屏；DPAPI 加密密码；取消内置 PS7。
+
 ## 许可证
 
 [MIT License](LICENSE) © Thatgfsj

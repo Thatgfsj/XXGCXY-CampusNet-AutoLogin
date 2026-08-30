@@ -705,6 +705,17 @@ AC → 放行该 IP/MAC → 客户端可以上网
 ---
 ## 9. 版本历史
 
+- **v1.9.1**：修复稳定性/边界测试发现的 3 个真实问题 + 新增自动化测试套件。
+  - **修复认证结果判定正则误匹配**（PS + sh 两端）：`"code":1` 会误匹配 `"code":10/100/123`（误报“账号不存在”），`"code":44` 会误匹配 `"code":440`（误报“非法接入”）。已加 `(?!\d)`（PS）与 `([^0-9]|$)`（grep）锚定，只有 code 精确等于 0/1/44 才命中。
+  - **修复请求日志明文泄漏密码**：`xywdl.ps1` 打印请求 URL 时 `passwd=` 现在脱敏为 `***`，不再泄漏密码到控制台/日志。
+  - **统一 PS 端参数 URL 编码**：`ssid/vlan/mac/wlanuserip/wlanacIp/version/portalpageid/portaltype/bindCtrlId` 之前未编码（SSID 含空格/`&`/`=`/中文会破坏 URL），现全部走 `Safe-UriEscape`，与 Linux `xywdl.sh` 的 `urlencode` 行为一致。
+  - **新增自动化测试套件**（`tests/`）：
+    - `tests/mock_portal.py` — 校园网认证 Mock 服务器（可配置返回 code）。
+    - `tests/run_ps1_tests.ps1` — xywdl.ps1 端到端 + 边界测试（认证判定/缺失损坏配置/参数编码/密码脱敏/稳定性共 23 项）。
+    - `tests/test_sh_judge.sh` — xywdl.sh 认证判定逻辑测试（11 项）。
+  - **新增 Rust 单元测试**：`parse_portal_url` 的 11 个用例（正常/HTTPS/空/大小写/UTF-8/特殊字符/重复 key/超长 query/非法 hex 等）。
+  - 版本号升至 1.9.1（package.json / Cargo.toml / tauri.conf.json）。
+
 - **v1.9.0**：登录模块彻底解耦。重大变更：
   - **登录配置从硬编码改为 JSON 模板 + 渲染器模式**。`%APPDATA%/xxgcxy-wifi/login_profile.json` 存元数据(学号/运营商/SSID/Portal URL/AC/VLAN/MAC 等),`login_credential.bin` 存 DPAPI 加密的密码。
   - **xywdl.ps1 大幅简化**:从 604 行的 6 个类改为 ~280 行的函数式脚本,移除交互式 Read-Host、移除自动检测 portal 重定向(`TryAutoDetectParams`)、移除手动粘贴 URL 引导。

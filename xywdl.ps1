@@ -374,22 +374,24 @@ function Invoke-CampusLogin {
     $queryParams = @(
         "userid=$(Safe-UriEscape $profile.user_id)",
         "passwd=$(Safe-UriEscape $password)",
-        "wlanuserip=$wlanUserIp",
+        "wlanuserip=$(Safe-UriEscape $wlanUserIp)",
         "wlanacname=$(Safe-UriEscape $profile.wlan_ac_name)",
-        "wlanacIp=$($profile.wlan_ac_ip)",
-        "ssid=$($profile.ssid)",
-        "vlan=$($profile.vlan)",
-        "mac=$macAddress",
-        "version=$version",
-        "portalpageid=$portalPageId",
+        "wlanacIp=$(Safe-UriEscape $profile.wlan_ac_ip)",
+        "ssid=$(Safe-UriEscape $profile.ssid)",
+        "vlan=$(Safe-UriEscape $profile.vlan)",
+        "mac=$(Safe-UriEscape $macAddress)",
+        "version=$(Safe-UriEscape $version)",
+        "portalpageid=$(Safe-UriEscape $portalPageId)",
         "timestamp=$([int](Get-Date -UFormat %s) * 1000)",
         "uuid=$([guid]::NewGuid().ToString())",
-        "portaltype=$portalType",
+        "portaltype=$(Safe-UriEscape $portalType)",
         "hostname=$(Safe-UriEscape $hostname)",
-        "bindCtrlId=$bindCtrlId"
+        "bindCtrlId=$(Safe-UriEscape $bindCtrlId)"
     ) -join "&"
     $requestUrl = $authUrl + "?" + $queryParams
-    Write-Host "[*] 请求: $requestUrl" -ForegroundColor Gray
+    # 安全: 不要在日志/控制台打印明文密码, 只显示脱敏后的 passwd=***
+    $maskedUrl = $requestUrl -replace '(?i)(passwd=)[^&]*', '$1***'
+    Write-Host "[*] 请求: $maskedUrl" -ForegroundColor Gray
 
     # 4. 发送
     try {
@@ -397,13 +399,15 @@ function Invoke-CampusLogin {
         $body = $response.Content
         Write-Host "[*] HTTP $($response.StatusCode): $body" -ForegroundColor White
 
-        if ($body -match '"code"\s*:\s*0' -or $body -match "success" -or $body -match "认证成功") {
+        # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
+        # "code":1 (账号不存在), "code":440 会被误判成 "code":44 (非法接入)。
+        if ($body -match '"code"\s*:\s*0(?!\d)' -or $body -match "success" -or $body -match "认证成功") {
             Write-Host "[+] 认证成功,已连接到互联网" -ForegroundColor Green
             return 0
-        } elseif ($body -match '"code"\s*:\s*1' -or $body -match "账号不存在") {
+        } elseif ($body -match '"code"\s*:\s*1(?!\d)' -or $body -match "账号不存在") {
             Write-Host "[!] 认证失败:账号不存在,请检查学号和运营商" -ForegroundColor Red
             return 1
-        } elseif ($body -match '"code"\s*:\s*44' -or $body -match "非法接入") {
+        } elseif ($body -match '"code"\s*:\s*44(?!\d)' -or $body -match "非法接入") {
             Write-Host "[!] 认证失败:非法接入,请检查 VLAN / MAC" -ForegroundColor Red
             return 44
         } else {
