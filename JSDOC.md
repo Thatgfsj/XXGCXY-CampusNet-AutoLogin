@@ -703,6 +703,14 @@ AC → 放行该 IP/MAC → 客户端可以上网
 ---
 ## 9. 版本历史
 
+- **v2.0.3**：登录脚本添加详细步骤日志，定位卡点更清晰。
+  - **登录流程步骤化**：每个阶段添加 `[步骤 X/5]` 标记，失败时明确显示 `[!] 卡在: 步骤 N`。
+  - **三层发送详细日志**：每层添加 `[第 N 层]` 标记，成功时显示响应长度，失败时显示具体错误原因（HTTP 状态码、exit code、异常信息）。
+  - **Python 候选探测日志**：显示每个 python 候选的查找结果（找到/未找到/探测失败）。
+  - **认证结果未知时显示完整响应体**：便于排查 portal 返回的未知 code。
+  - **Linux 版同步添加步骤日志**：与 PS 端一致的步骤标记和卡点提示。
+  - **版本号升到 2.0.3**（package.json / Cargo.toml / Cargo.lock / tauri.conf.json / build-all.yml / JSDOC / README）。
+
 - **v2.0.2**：修复 SSID 留空导致无法登录。
   - **修复登录无法使用（根因）**：`xywdl.ps1` 的 `Load-LoginProfile` 把 `ssid` 列为必填字段，但 UI 允许（且高级字段引导）SSID 留空。留空时脚本直接报"缺少字段: ssid"并 `exit 2`，登录请求根本没发出去。修法：将 `ssid` 移出必填列表，运行时由 `Get-CurrentSsid()` 自动取当前连接的 WiFi SSID 兜底；未连接任何 WiFi 时仍为空则提示用户填写。
   - **版本号升到 2.0.2**（package.json / Cargo.toml / tauri.conf.json / build-all.yml / JSDOC / README）。

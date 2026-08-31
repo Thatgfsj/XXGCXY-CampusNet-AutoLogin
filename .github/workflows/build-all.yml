@@ -106,7 +106,7 @@ jobs:
 
       - name: Create Linux packages
         run: |
-          APP_VERSION="2.0.2"
+          APP_VERSION="2.0.3"
           mkdir -p release/linux
 
           # Copy deb package
@@ -240,10 +240,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.2
-          name: v2.0.2 - 校园网自动登录助手
+          tag_name: v2.0.3
+          name: v2.0.3 - 校园网自动登录助手
           body: |
-            v2.0.2 - 校园网自动登录助手
+            v2.0.3 - 校园网自动登录助手
 
             ## 系统要求
 
@@ -254,18 +254,18 @@ jobs:
             ## 下载
 
             **Windows (系统 PowerShell 5.1+, 体积小)**
-            - `xxgcxy-wifi_2.0.2_x64-setup.exe` - NSIS installer (~5 MB)
-            - `xxgcxy-wifi_2.0.2_x64_zh-CN.msi` - MSI installer (~6 MB)
+            - `xxgcxy-wifi_2.0.3_x64-setup.exe` - NSIS installer (~5 MB)
+            - `xxgcxy-wifi_2.0.3_x64_zh-CN.msi` - MSI installer (~6 MB)
 
             **Linux**
-            - `xxgcxy-wifi_2.0.2_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v2.0.2-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-2.0.2-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_2.0.3_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v2.0.3-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-2.0.3-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs curl or python3)
 
-            ## What's New in v2.0.2
+            ## What's New in v2.0.3
 
             ### 修复 (Fix)
             - **修复登录无法使用**: SSID 留空被误判为"缺少字段"而拒绝登录 (根因 bug)
@@ -283,9 +283,9 @@ jobs:
             ## 升级说明
 
             从 v1.9.x 升级：
-            1. 直接安装 v2.0.2 安装包
+            1. 直接安装 v2.0.3 安装包
             2. 现有账号/WiFi 配置保留
-            3. 若之前因 MAC 留空无法登录, 升级后即可正常登录
+            3. 若之前因 MAC/SSID 留空无法登录, 升级后即可正常登录
           files: |
             artifacts/windows/*.exe
             artifacts/windows/*.msi
