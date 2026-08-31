@@ -74,7 +74,6 @@ pub struct Config {
     pub primary_ssid: String,
     pub backup_ssid: String,
     pub check_interval: u64,
-    pub test_hosts: Vec<String>,
 }
 
 impl Default for Config {
@@ -83,7 +82,6 @@ impl Default for Config {
             primary_ssid: String::new(),
             backup_ssid: String::new(),
             check_interval: 15,
-            test_hosts: vec!["http://connect.rom.miui.com/generate_204".to_string(), "http://httpstat.us/204".to_string()],
         }
     }
 }
@@ -362,18 +360,6 @@ fn save_login_profile(profile: LoginProfile, password: String) -> Result<(), Str
     fs::write(get_login_credential_path(), encrypted)
         .map_err(|e| format!("写入加密密码失败: {}", e))?;
 
-    Ok(())
-}
-
-/// 清除登录配置 + 加密密码 + 旧版残留文件
-#[tauri::command]
-fn clear_login_profile() -> Result<(), String> {
-    // 复用 clear_campus_net_info 的清理逻辑(逻辑已迁移到那里)
-    let _ = fs::remove_file(get_login_profile_path());
-    let _ = fs::remove_file(get_login_credential_path());
-    for legacy in get_legacy_campus_config_candidates() {
-        let _ = fs::remove_file(legacy);
-    }
     Ok(())
 }
 
@@ -888,19 +874,6 @@ async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
         networks.sort_by(|a, b| b.signal.cmp(&a.signal));
         Ok(networks)
     }
-}
-
-// ============= 获取 WiFi 信号强度 =============
-
-#[tauri::command]
-async fn get_wifi_signal(ssid: String) -> Result<u8, String> {
-    let networks = scan_wifi().await?;
-    for net in &networks {
-        if net.ssid == ssid {
-            return Ok(net.signal);
-        }
-    }
-    Ok(0)
 }
 
 // ============= 连接 WiFi（跨平台） =============
@@ -1418,7 +1391,6 @@ pub fn run() {
             save_config,
             scan_wifi,
             connect_wifi,
-            get_wifi_signal,
             check_network,
             run_login_script,
             get_check_enabled,
@@ -1432,7 +1404,6 @@ pub fn run() {
             is_login_configured,
             get_login_profile,
             save_login_profile,
-            clear_login_profile,
             parse_portal_url,
             run_login_with_profile,
         ])

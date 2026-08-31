@@ -106,7 +106,7 @@ jobs:
 
       - name: Create Linux packages
         run: |
-          APP_VERSION="1.8.3"
+          APP_VERSION="2.0.0"
           mkdir -p release/linux
 
           # Copy deb package
@@ -240,66 +240,51 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.9.0
-          name: v1.9.0 - 校园网自动登录助手
+          tag_name: v2.0.0
+          name: v2.0.0 - 校园网自动登录助手
           body: |
-            v1.9.0 - 校园网自动登录助手
+            v2.0.0 - 校园网自动登录助手
 
             ## 系统要求
 
             - **Windows 10/11**: 自带 PowerShell 5.1+ / .NET Framework 4.x
             - **Windows 7/8**: 需装 WMF 5.1（[下载](https://www.microsoft.com/en-us/download/details.aspx?id=54616)）
-            - **Linux**: 需 pwsh 7+（[安装](https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux)）
+            - **Linux**: 需 curl 或 python3（[安装](https://www.python.org/downloads/)）
 
             ## 下载
 
             **Windows (系统 PowerShell 5.1+, 体积小)**
-            - `xxgcxy-wifi_1.9.0_x64-setup.exe` - NSIS installer (~5 MB)
-            - `xxgcxy-wifi_1.9.0_x64_zh-CN.msi` - MSI installer (~6 MB)
+            - `xxgcxy-wifi_2.0.0_x64-setup.exe` - NSIS installer (~5 MB)
+            - `xxgcxy-wifi_2.0.0_x64_zh-CN.msi` - MSI installer (~6 MB)
 
             **Linux**
-            - `xxgcxy-wifi_1.9.0_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v1.9.0-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-1.9.0-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_2.0.0_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v2.0.0-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-2.0.0-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
-            - `xywdl.sh` - Standalone shell script (Linux/macOS, needs pwsh)
+            - `xywdl.sh` - Standalone shell script (Linux/macOS, needs curl or python3)
 
-            ## What's New in v1.9.0
-
-            ### 新功能 (Feat)
-            - **登录模块解耦**: 改为 JSON 模板 (login_profile.json) + 渲染器模式
-            - **可视化登录配置屏** (`#loginConfigScreen`): 运营商/学号/密码/Portal URL
-            - **首次启动自动弹窗**: 未配置账号时强制弹登录配置屏
-            - **设置页入口** ("更改账号信息" 按钮)
-            - **Portal URL 一键解析**: 粘贴重定向 URL → 自动填充 SSID/AC/VLAN/MAC
-            - **密码用 Windows DPAPI 加密** (login_credential.bin)
-
-            ### 重构 (Refactor)
-            - **xywdl.ps1** 从 604 行简化到 280 行 (-54%)
-            - 移除交互式 Read-Host 和自动检测 portal 重定向
-            - 配置从硬编码改为 JSON 模板
+            ## What's New in v2.0.0
 
             ### 修复 (Fix)
-            - 修复校园网配置读取路径
-            - xywdl.bat 修复编码问题
-            - 移除 Unix-only 的 `Permissions::from_mode` 调用，修复 Windows 编译
-            - **urldecode UTF-8 多字节字符支持** (修复中文/emoji 乱码)
-            - **前端 XSS 修复** (DOM API 替代 innerHTML)
-            - **CI 编译错误修复** (url_decode_form 末尾多余变量)
-            - 启动窗口行为修复 (没登录信息不隐藏，有则隐藏)
+            - **修复登录无法使用**: MAC 地址留空被误判为"缺少字段"而拒绝登录 (根因 bug)
+            - **修复 PS 管道双 BOM**: 发送 URL 到 C#/Python 保底层时开头多出 BOM 字符
+            - **修复 Portal URL 解析按钮连点报错**: 加防重复点击锁
 
-            ### 破坏性变更 (Breaking)
-            - **不兼容** 旧的 `%APPDATA%\xxgc_campus_net_config.txt`
-            - 首次启动需要重新配置账号
+            ### 新功能 (Feat)
+            - **请求发送三层降级** (Windows): PowerShell → C# sender → Python sender
+            - **请求发送两层降级** (Linux): curl → Python sender
+            - **跨平台最强保底**: 纯标准库 Python sender (src/sender/sender.py)
+            - **C# 保底发送器**: 预编译 xywdl_sender.exe (5KB, .NET Framework 4.x)
+            - 密码通过 stdin 管道传给保底层, 不进进程命令行
 
             ## 升级说明
 
-            从 v1.8.x 升级：
-            1. 备份旧配置：`%APPDATA%\xxgc_campus_net_config.txt` 中的学号和密码
-            2. 安装 v1.9.0 安装包
-            3. 启动后会看到登录配置屏，填入学号/密码/Portal URL
-            4. WiFi 配置 (主网络/备用网络) 保留
+            从 v1.9.x 升级：
+            1. 直接安装 v2.0.0 安装包
+            2. 现有账号/WiFi 配置保留
+            3. 若之前因 MAC 留空无法登录, 升级后即可正常登录
           files: |
             artifacts/windows/*.exe
             artifacts/windows/*.msi

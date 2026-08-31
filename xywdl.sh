@@ -71,7 +71,8 @@ BIND_CTRL_ID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(s
 HOSTNAME_VAL=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('hostname',''))")
 
 # 校验必需字段
-for f in "user_id:$USER_ID" "base_url:$BASE_URL" "vlan:$VLAN" "mac_address:$PROFILE_MAC"; do
+# mac_address / wlan_user_ip 是可选的: UI 允许留空, 运行时由本机自动取兜底
+for f in "user_id:$USER_ID" "base_url:$BASE_URL" "vlan:$VLAN"; do
     key="${f%%:*}"
     val="${f#*:}"
     if [[ -z "$val" ]]; then
@@ -148,15 +149,47 @@ print(urllib.parse.urlencode(params))
 REQUEST_URL="${AUTH_URL}?${QUERY}"
 log_info "[*] 请求: $REQUEST_URL"
 
-# 发送 (带 noproxy 避免系统代理干扰, 跟 PS 端 -Proxy $null 一致)
-HTTP_CODE=$(curl -s -o /tmp/xywdl_response.txt -w "%{http_code}" \
-    --max-redirs 0 --noproxy '*' --max-time 15 \
-    "$REQUEST_URL" 2>&1 || echo "000")
+# 发送 (两层降级: curl → python3 sender.py)
+# 完整 URL 通过 stdin 传给 sender, 避免明文密码出现在进程命令行
+RESPONSE=""
 
-RESPONSE=$(cat /tmp/xywdl_response.txt 2>/dev/null || echo "")
-rm -f /tmp/xywdl_response.txt
+# 第 1 层: curl (默认主力, 带 noproxy 避免系统代理干扰)
+if curl --version >/dev/null 2>&1; then
+    HTTP_CODE=$(curl -s -o /tmp/xywdl_response.txt -w "%{http_code}" \
+        --max-redirs 0 --noproxy '*' --max-time 15 \
+        "$REQUEST_URL" 2>/dev/null || echo "000")
+    # 000 = 连接层失败; 4xx/5xx 也算"发出去了", body 交给判定
+    if [[ "$HTTP_CODE" != "000" ]]; then
+        RESPONSE=$(cat /tmp/xywdl_response.txt 2>/dev/null || echo "")
+        rm -f /tmp/xywdl_response.txt
+        log_info "[*] 发送层: curl (HTTP $HTTP_CODE)"
+    else
+        log_warn "[*] curl 发送失败, 降级到 python3..."
+    fi
+else
+    log_warn "[*] 未找到 curl, 使用 python3 发送..."
+fi
 
-log_info "[*] HTTP $HTTP_CODE: $RESPONSE"
+# 第 2 层: python3 sender.py (纯标准库, 跨平台最强保底)
+if [[ -z "$RESPONSE" ]]; then
+    PY_SENDER="$SCRIPT_DIR/src/sender/sender.py"
+    if [[ ! -f "$PY_SENDER" ]]; then
+        PY_SENDER="$SCRIPT_DIR/sender.py"
+    fi
+    if command -v python3 >/dev/null 2>&1 && [[ -f "$PY_SENDER" ]]; then
+        if RESPONSE=$(printf '%s' "$REQUEST_URL" | python3 "$PY_SENDER" 2>/dev/null); then
+            log_info "[*] 发送层: python3 (sender.py)"
+        else
+            log_error "[!] python3 发送失败"
+            exit 99
+        fi
+    else
+        log_error "[!] 所有发送层均失败 (无 curl 且无 python3/sender.py)"
+        exit 99
+    fi
+fi
+
+log_info "[*] 响应: $RESPONSE"
 
 # 判定结果 (跟 PS 端一致)
 # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成

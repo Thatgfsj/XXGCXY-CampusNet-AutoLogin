@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 1.8.3 |
+| **当前版本** | 2.0.0 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -36,7 +36,6 @@
 | reqwest | 0.11 (blocking) | HTTP 客户端（阻塞模式，用于连通性检测） |
 | serde / serde_json | 1.0 | JSON 序列化/反序列化 |
 | dirs | 5 | 跨平台用户目录获取 |
-| ping | 0.5 | ICMP Ping（嵌入式依赖） |
 | windows (crate) | 0.58 | Win32 API 绑定（单例互斥体） |
 | winreg | 0.52 | Windows 注册表操作（开机自启） |
 | tauri-plugin-shell | 2 | 启动外部脚本 + 打开系统浏览器 |
@@ -68,26 +67,36 @@ XXGCXY-CampusNet-AutoLogin/
 ├── .gitignore                     # 忽略 node_modules, dist, target, 临时文件
 ├── .github/
 │   └── workflows/
+│       ├── build-all.yml          # 多平台构建 + 发布
 │       └── build-linux.yml        # Linux .deb 构建工作流（仅 tag 触发）
 │
-├── index.html                     # 前端单页应用（~910行），含完整 CSS + JS
-├── package.json                   # Node.js 项目配置 (campus-wifi, 1.8.3)
+├── index.html                     # 前端单页应用（~1580行），含完整 CSS + JS
+├── package.json                   # Node.js 项目配置 (campus-wifi, 2.0.0)
 ├── package-lock.json              # 依赖锁定文件
 │
-├── xywdl.ps1                      # ★ 核心认证脚本（~604行，PowerShell 类实现）
-├── xywdl.bat                      # Windows 启动器（~87行，自动查找 PS7/回退 PS5）
-├── xywdl.sh                       # Linux 启动脚本（~305行，纯 Bash）
+├── xywdl.ps1                      # ★ 核心认证脚本（~500行，函数式，含三层降级发送）
+├── xywdl.bat                      # Windows 启动器（找系统 pwsh / powershell）
+├── xywdl.sh                       # Linux 启动脚本（~330行，纯 Bash，含两层降级发送）
+│
+├── src/sender/                    # 请求发送保底层 (v2.0.0+)
+│   ├── sender.cs                  # C# 源码
+│   ├── sender.py                  # Python 源码（纯标准库，跨平台）
+│   └── xywdl_sender.exe           # 预编译 C# 发送器 (~5KB, .NET Framework 4.x)
 │
 ├── README.md                      # 项目说明（功能、安装、构建）
 ├── SPEC.md                        # 功能规范文档（13条验收标准）
 ├── AUTH_MECHANISM.md              # ★ 认证机制详解（Portal 协议、DPAPI 加密、204检测）
-├── TECHNICAL_DOC.md               # ★ 本文档
+├── JSDOC.md                       # ★ 本文档
 │
 ├── create_icon.ps1                # 图标生成脚本
-├── linux_logs.zip                 # Linux 日志归档
+│
+├── tests/                         # 自动化测试套件 (v1.9.1+)
+│   ├── mock_portal.py             # 校园网认证 Mock 服务器
+│   ├── run_ps1_tests.ps1          # xywdl.ps1 端到端 + 边界测试（23 项）
+│   └── test_sh_judge.sh           # xywdl.sh 认证判定逻辑测试（11 项）
 │
 └── src-tauri/                     # Tauri 后端（Rust）
-    ├── Cargo.toml                 # Rust 包配置 (app, 1.8.3)
+    ├── Cargo.toml                 # Rust 包配置 (app, 2.0.0)
     ├── Cargo.lock                 # 依赖锁定
     ├── build.rs                   # 构建脚本（复制 WebView2Loader.dll）
     ├── tauri.conf.json            # Tauri 配置（窗口、打包、NSIS、插件权限）
@@ -102,7 +111,6 @@ XXGCXY-CampusNet-AutoLogin/
     │   └── installer.nsi          # NSIS 安装器钩子脚本
     │
     ├── bin/
-    │   ├── _pw7_/                 # 内置 PowerShell 7 便携版（Git LFS 管理）
     │   └── WebView2Loader.dll     # WebView2 运行时加载器
     │
     ├── .cargo/                    # 自定义链接器配置（Windows 便携构建用）
@@ -315,7 +323,7 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 #### 5.1.9 配置管理
 
 - **存储路径**：`~/.local/share/xxgcxy-wifi/config.json`（Linux）或 `%LOCALAPPDATA%/xxgcxy-wifi/config.json`（Windows）
-- **结构体**：`{ primary_ssid, backup_ssid, check_interval, test_hosts }`
+- **结构体**：`{ primary_ssid, backup_ssid, check_interval }`
 - **加载时机**：程序启动时、setup 阶段（如果已有配置则隐藏窗口）
 - **保存时机**：用户在配置面板点击"保存配置"
 - **首次运行判断**：`primary_ssid` 为空 → 首次运行 → 显示主窗口
@@ -328,7 +336,6 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 | `save_config` | `config: Config` | `Result<()>` | 保存配置到磁盘 |
 | `scan_wifi` | — | `Result<Vec<WifiNetwork>>` | 扫描可用 WiFi |
 | `connect_wifi` | `ssid: String` | `Result<()>` | 连接指定 WiFi |
-| `get_wifi_signal` | `ssid: String` | `Result<u8>` | 获取指定 SSID 信号强度 |
 | `check_network` | — | `Result<NetworkStatus>` | 综合网络状态检测 |
 | `run_login_script` | — | `Result<String>` | 执行登录脚本(兼容旧版本) |
 | `get_check_enabled` | — | `bool` | 获取自动检测开关状态 |
@@ -341,7 +348,6 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 | `is_login_configured` | — | `bool` | **(v1.9.0+)** 是否已配置校园网账号 |
 | `get_login_profile` | — | `Result<LoginProfile>` | **(v1.9.0+)** 读取登录配置(不含密码) |
 | `save_login_profile` | `profile: LoginProfile, password: String` | `Result<()>` | **(v1.9.0+)** 保存登录配置 + DPAPI 加密密码 |
-| `clear_login_profile` | — | `Result<()>` | **(v1.9.0+)** 删除登录配置 + 凭据 |
 | `parse_portal_url` | `url: String` | `Result<ParsedPortal>` | **(v1.9.0+)** 解析 portal.do 重定向 URL |
 | `run_login_with_profile` | — | `Result<String>` | **(v1.9.0+)** 用已保存的 profile 执行登录 |
 
@@ -530,20 +536,16 @@ exit $code              --non-interactive 模式直接退出,交互模式 Read-H
 
 #### 5.4.1 Windows (`xywdl.bat`)
 
-查找策略（优先级从高到低）：
-1. `%~dp0\_pw7_\pwsh.exe`（内置 PS7 便携版）
-2. `%~dp0\..\bin\_pw7_\pwsh.exe`
-3. `%~dp0\..\_pw7_\pwsh.exe`
-4. `%~dp0\bin\_pw7_\pwsh.exe`
-5. 系统 PATH 中的 `pwsh`
-6. 回退到 `powershell`（PS 5.1）
+查找策略（v1.9.0+ 不再内置 PS7，直接用系统引擎）：
+1. 系统 PATH 中的 `pwsh`（PowerShell 7）
+2. 回退到 `powershell`（Windows PowerShell 5.1）
 
 执行方式：`pwsh/powershell -ExecutionPolicy Bypass -File "xywdl.ps1" [args]`
 
 #### 5.4.2 Linux (`xywdl.sh`)
 
 - 配置路径：`~/.config/xxgcxy-wifi/login_config.json`
-- 使用 `curl --max-redirs 0` 实现重定向捕获
+- 登录请求发送两层降级（v2.0.0+）：curl（默认）→ python3 `src/sender/sender.py`
 - 使用 `python3 -c "import urllib.parse"` 做 URL 编解码
 - 支持 `--non-interactive` 非交互模式（由 Tauri 调用时使用）
 
@@ -617,11 +619,7 @@ exit $code              --non-interactive 模式直接退出,交互模式 Read-H
 {
   "primary_ssid": "XXGCXY-Student",
   "backup_ssid": "",
-  "check_interval": 15,
-  "test_hosts": [
-    "http://connect.rom.miui.com/generate_204",
-    "http://httpstat.us/204"
-  ]
+  "check_interval": 15
 }
 ```
 
@@ -705,6 +703,18 @@ AC → 放行该 IP/MAC → 客户端可以上网
 ---
 ## 9. 版本历史
 
+- **v2.0.0**：修复登录核心 bug + 请求发送多层级降级 + 死代码清理。
+  - **修复登录无法使用（根因）**：`xywdl.ps1` 的 `Load-LoginProfile` 把 `mac_address` 列为必填字段，但 UI 允许（且引导）MAC 留空。留空时脚本直接报"缺少字段: mac_address"并 `exit 2`，登录请求根本没发出去——表现为 UI 日志"正在执行登录..."后无任何回显。修法：将 `mac_address` / `wlan_user_ip` 移出必填列表，运行时由 `Get-WirelessMacAddress()` / `Get-WifiIpAddress()` 自动取本地值兜底（`xywdl.sh` 同步修复）。
+  - **请求发送三层降级（Windows）**：PowerShell `Invoke-WebRequest`（默认）→ C# `src/sender/xywdl_sender.exe`（.NET Framework 4.x，5KB）→ Python `src/sender/sender.py`（纯标准库）。前一层失败自动尝试下一层，三层全失败才报错。
+  - **请求发送两层降级（Linux）**：curl（默认）→ python3 `sender.py`。
+  - **跨平台最强保底**：`sender.py` 只用标准库 `urllib`，Windows/Linux/macOS 通用，Python 3.6+ 即可。
+  - **密码安全传递**：完整 URL 经 stdin 管道传给 C#/Python 保底层，避免明文密码出现在进程命令行。
+  - **修复 PS 管道双 BOM 问题**：`[Console]::OutputEncoding` 与 `$OutputEncoding` 都设 UTF8 时，PowerShell 5.1 管道给原生进程传字符串会叠加两个 BOM（`efbbbfefbbbf`），导致 C#/Python sender 收到 `\uFEFF\uFEFFhttp://...` 报"URI 方案无效"。修法：`$OutputEncoding` 改用无 BOM 的 `UTF8Encoding($false)`，且两个 sender 都剥掉开头所有 BOM。
+  - **修复 Python 保底层被 WindowsApps 占位 stub 坑**：`Get-Command python3` 可能解析到商店占位 stub（运行返回 9009）。修法：逐个候选 `py -3` / `python` / `python3` 做"能真正运行"探测，跳过假 python。
+  - **修复 Portal URL 解析按钮连点报错**：`parsePortalUrl` 加防重复点击锁（`portalParsing` + 按钮禁用），避免并发 invoke 报错。
+  - **死代码清理**：前端 `test_hosts` 死配置；Rust `get_wifi_signal` / `clear_login_profile` 两个未被前端调用的命令；Cargo 的 `ping` 死依赖。
+  - **版本号同步**：package.json / Cargo.toml / Cargo.lock / tauri.conf.json / build-all.yml 统一升到 2.0.0（Cargo.lock 此前停在 1.9.0 未同步）。
+
 - **v1.9.1**：修复稳定性/边界测试发现的 3 个真实问题 + 新增自动化测试套件。
   - **修复认证结果判定正则误匹配**（PS + sh 两端）：`"code":1` 会误匹配 `"code":10/100/123`（误报“账号不存在”），`"code":44` 会误匹配 `"code":440`（误报“非法接入”）。已加 `(?!\d)`（PS）与 `([^0-9]|$)`（grep）锚定，只有 code 精确等于 0/1/44 才命中。
   - **修复请求日志明文泄漏密码**：`xywdl.ps1` 打印请求 URL 时 `passwd=` 现在脱敏为 `***`，不再泄漏密码到控制台/日志。
@@ -740,7 +750,7 @@ AC → 放行该 IP/MAC → 客户端可以上网
 - Rust 1.77.2+
 - Node.js 18+
 - Windows 10/11 或 Ubuntu 24.04
-- Git LFS（存储 PS7 便携版二进制）
+- .NET Framework 4.x（仅构建 C# sender 时需要，Windows 自带）
 
 ### 10.2 本地运行
 

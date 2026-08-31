@@ -7,6 +7,11 @@
 #    3. 配置全部从 JSON 模板读取: %APPDATA%/xxgcxy-wifi/login_profile.json
 #    4. 密码从 DPAPI 加密的 .bin 读取,本脚本自动解密
 #    5. 运营商由 profile.operator 字段决定 (yd/lt/dx)
+#    6. (v2.0.0+) 请求发送三层降级:
+#       ① PowerShell Invoke-WebRequest (默认主力)
+#       ② src/sender/xywdl_sender.exe (C#, .NET Framework 4.x, Win7+ 自带)
+#       ③ src/sender/sender.py (Python 3, 纯标准库, 跨平台最强保底)
+#       PS 发送失败自动降级到下一层, 三层全失败才报错。
 #
 #  兼容:
 #    - pwsh 7.x  (推荐)
@@ -14,7 +19,11 @@
 ###############################################################################
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
+# 注意: 用不带 BOM 的 UTF8 作为 $OutputEncoding。
+# 若用 [System.Text.Encoding]::UTF8 (带 BOM), 管道传给原生进程
+# (C#/Python sender) 时会叠加 [Console]::OutputEncoding 的 BOM,
+# 导致 URL 开头出现两个 BOM 字符, 被 sender 判为"无效 URI"。
+$OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 chcp 65001 | Out-Null
 
 # ============= PS 版本检查 =============
@@ -107,8 +116,9 @@ function Load-LoginProfile {
         # 拿到字段名 (兼容 hashtable 和 PSCustomObject)
         $fieldNames = if ($json -is [hashtable]) { $json.Keys } else { $json.PSObject.Properties.Name }
 
-        $required = @("user_id", "operator", "base_url", "vlan", "mac_address", "ssid", "wlan_ac_name", "wlan_ac_ip")
-        # wlan_user_ip 是可选的,运行时由 Get-WifiIpAddress() 自动取本地 IP 兜底
+        $required = @("user_id", "operator", "base_url", "vlan", "ssid", "wlan_ac_name", "wlan_ac_ip")
+        # wlan_user_ip / mac_address 是可选的: UI 允许留空,
+        # 运行时由 Get-WifiIpAddress() / Get-WirelessMacAddress() 自动取本地值兜底
         foreach ($f in $required) {
             if (-not ($fieldNames -contains $f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
                 Write-Host "[!] 登录配置缺少字段: $f" -ForegroundColor Red
@@ -393,29 +403,122 @@ function Invoke-CampusLogin {
     $maskedUrl = $requestUrl -replace '(?i)(passwd=)[^&]*', '$1***'
     Write-Host "[*] 请求: $maskedUrl" -ForegroundColor Gray
 
-    # 4. 发送
+    # 4. 发送 (三层降级: PowerShell → C# sender → Python sender)
+    # 每层失败都会记录原因, 自动尝试下一层; 只有三层全失败才报错。
+    $body = $null
+    $sendSource = ""
+    $sendErrors = @()
+
+    # 4.1 第 1 层: PowerShell Invoke-WebRequest (默认主力)
     try {
         $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop -Proxy $null
         $body = $response.Content
-        Write-Host "[*] HTTP $($response.StatusCode): $body" -ForegroundColor White
-
-        # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
-        # "code":1 (账号不存在), "code":440 会被误判成 "code":44 (非法接入)。
-        if ($body -match '"code"\s*:\s*0(?!\d)' -or $body -match "success" -or $body -match "认证成功") {
-            Write-Host "[+] 认证成功,已连接到互联网" -ForegroundColor Green
-            return 0
-        } elseif ($body -match '"code"\s*:\s*1(?!\d)' -or $body -match "账号不存在") {
-            Write-Host "[!] 认证失败:账号不存在,请检查学号和运营商" -ForegroundColor Red
-            return 1
-        } elseif ($body -match '"code"\s*:\s*44(?!\d)' -or $body -match "非法接入") {
-            Write-Host "[!] 认证失败:非法接入,请检查 VLAN / MAC" -ForegroundColor Red
-            return 44
-        } else {
-            Write-Host "[!] 认证结果未知,请检查账号密码" -ForegroundColor Yellow
-            return 99
-        }
+        $sendSource = "PowerShell (Invoke-WebRequest)"
     } catch {
-        Write-Host "[!] 认证请求失败: $($_.Exception.Message)" -ForegroundColor Red
+        $sendErrors += "PowerShell: $($_.Exception.Message)"
+    }
+
+    # 4.2 第 2 层: C# sender (xywdl_sender.exe, .NET Framework 4.x, Win7+ 自带运行时)
+    if ($null -eq $body) {
+        $senderExe = $null
+        foreach ($cand in @(
+                (Join-Path $PSScriptRoot "src\sender\xywdl_sender.exe"),
+                (Join-Path $PSScriptRoot "xywdl_sender.exe")
+            )) {
+            if (Test-Path -LiteralPath $cand) { $senderExe = $cand; break }
+        }
+        if ($senderExe) {
+            try {
+                # 完整 URL 通过 stdin 传给 sender, 避免明文密码出现在进程命令行
+                $rawOut = $requestUrl | & $senderExe 2>&1
+                $exitCode = $LASTEXITCODE
+                if ($exitCode -eq 0) {
+                    $body = ($rawOut | Out-String).Trim()
+                    $sendSource = "C# ($([System.IO.Path]::GetFileName($senderExe)))"
+                } else {
+                    $sendErrors += "C#: exit=$exitCode $($rawOut | Out-String)"
+                }
+            } catch {
+                $sendErrors += "C#: $($_.Exception.Message)"
+            }
+        } else {
+            $sendErrors += "C#: 未找到 xywdl_sender.exe"
+        }
+    }
+
+    # 4.3 第 3 层: Python sender (sender.py, 纯标准库, 跨平台最强保底)
+    if ($null -eq $body) {
+        $pyScript = $null
+        foreach ($cand in @(
+                (Join-Path $PSScriptRoot "src\sender\sender.py"),
+                (Join-Path $PSScriptRoot "sender.py")
+            )) {
+            if (Test-Path -LiteralPath $cand) { $pyScript = $cand; break }
+        }
+        # 找可用的 python: 逐个候选做"能真正运行"的验证,
+        # 跳过 WindowsApps 商店占位 stub (运行返回 9009 的假 python)
+        $py = $null
+        $pyArgs = @()
+        foreach ($c in @(
+                @{ Name = "py";    Args = @("-3") },
+                @{ Name = "python"; Args = @() },
+                @{ Name = "python3"; Args = @() }
+            )) {
+            $cmd = Get-Command $c.Name -ErrorAction SilentlyContinue
+            if (-not $cmd) { continue }
+            try {
+                $probe = & $cmd.Source @($c.Args) -c "import sys; print('PYOK')" 2>$null
+                if ($LASTEXITCODE -eq 0 -and ($probe -join '') -match 'PYOK') {
+                    $py = $cmd.Source
+                    $pyArgs = @($c.Args)
+                    break
+                }
+                $sendErrors += "Python: $($c.Name) 不可用 (exit=$LASTEXITCODE)"
+            } catch {
+                $sendErrors += "Python: $($c.Name) 启动失败: $($_.Exception.Message)"
+            }
+        }
+        if ($pyScript -and $py) {
+            try {
+                $rawOut = $requestUrl | & $py @pyArgs $pyScript 2>&1
+                $exitCode = $LASTEXITCODE
+                if ($exitCode -eq 0) {
+                    $body = ($rawOut | Out-String).Trim()
+                    $sendSource = "Python (sender.py)"
+                } else {
+                    $sendErrors += "Python: exit=$exitCode $($rawOut | Out-String)"
+                }
+            } catch {
+                $sendErrors += "Python: $($_.Exception.Message)"
+            }
+        } else {
+            $sendErrors += "Python: 未找到可用的 python 解释器或 sender.py"
+        }
+    }
+
+    # 5. 判定结果 (三层共用同一套判定逻辑)
+    if ($null -eq $body) {
+        Write-Host "[!] 所有发送层均失败,请检查网络/代理设置:" -ForegroundColor Red
+        foreach ($e in $sendErrors) { Write-Host "      - $e" -ForegroundColor Red }
+        return 99
+    }
+
+    Write-Host "[*] 发送层: $sendSource" -ForegroundColor Cyan
+    Write-Host "[*] 响应: $body" -ForegroundColor White
+
+    # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
+    # "code":1 (账号不存在), "code":440 会被误判成 "code":44 (非法接入)。
+    if ($body -match '"code"\s*:\s*0(?!\d)' -or $body -match "success" -or $body -match "认证成功") {
+        Write-Host "[+] 认证成功,已连接到互联网" -ForegroundColor Green
+        return 0
+    } elseif ($body -match '"code"\s*:\s*1(?!\d)' -or $body -match "账号不存在") {
+        Write-Host "[!] 认证失败:账号不存在,请检查学号和运营商" -ForegroundColor Red
+        return 1
+    } elseif ($body -match '"code"\s*:\s*44(?!\d)' -or $body -match "非法接入") {
+        Write-Host "[!] 认证失败:非法接入,请检查 VLAN / MAC" -ForegroundColor Red
+        return 44
+    } else {
+        Write-Host "[!] 认证结果未知,请检查账号密码" -ForegroundColor Yellow
         return 99
     }
 }

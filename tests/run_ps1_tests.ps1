@@ -189,7 +189,10 @@ if ($mockRecords.Count -gt 0) {
     Assert-True ($params.ssid -eq "XXGC-WiFi 5G") "C1 ssid 正确解码" "got='$($params.ssid)'"
     Assert-True ($params.passwd -eq 'P@ssw0rd! a=b&c?d#e') "C1 passwd 正确解码(含空格/&=?#)" "got='$($params.passwd)'"
     Assert-True ($params.userid -eq "2021110101@xxgcyd") "C1 userid 正确解码" "got='$($params.userid)'"
-    Assert-True ($params.mac -eq "aa:bb:cc:dd:ee:ff") "C1 mac 正确解码" "got='$($params.mac)'"
+    # mac: 脚本会优先用运行时取到的真实本机 MAC (自动兜底), 而非 profile 里的值
+    # 只断言格式合法即可, 不锁定具体值
+    $macOk = $params.mac -match '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'
+    Assert-True $macOk "C1 mac 为合法 MAC 格式(脚本自动获取)" "got='$($params.mac)'"
 } else {
     Assert-True $false "C1 mock 未收到请求" "mock_log 为空 ($mockLog)"
 }

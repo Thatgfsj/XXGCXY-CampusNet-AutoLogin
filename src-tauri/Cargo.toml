@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.9.1"
+version = "2.0.0"
 description = "校园网自动登录助手"
 authors = ["Thatgfsj"]
 license = "MIT"
@@ -23,7 +23,6 @@ tauri = { version = "2.10.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tokio = { version = "1", features = ["full"] }
-ping = "0.5"
 dirs = "5"
 reqwest = { version = "0.11", features = ["blocking"] }
 
