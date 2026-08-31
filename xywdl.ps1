@@ -116,9 +116,9 @@ function Load-LoginProfile {
         # 拿到字段名 (兼容 hashtable 和 PSCustomObject)
         $fieldNames = if ($json -is [hashtable]) { $json.Keys } else { $json.PSObject.Properties.Name }
 
-        $required = @("user_id", "operator", "base_url", "vlan", "ssid", "wlan_ac_name", "wlan_ac_ip")
-        # wlan_user_ip / mac_address 是可选的: UI 允许留空,
-        # 运行时由 Get-WifiIpAddress() / Get-WirelessMacAddress() 自动取本地值兜底
+        $required = @("user_id", "operator", "base_url", "vlan", "wlan_ac_name", "wlan_ac_ip")
+        # wlan_user_ip / mac_address / ssid 是可选的: UI 允许留空,
+        # 运行时由 Get-WifiIpAddress() / Get-WirelessMacAddress() / Get-CurrentSsid() 自动取本地值兜底
         foreach ($f in $required) {
             if (-not ($fieldNames -contains $f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
                 Write-Host "[!] 登录配置缺少字段: $f" -ForegroundColor Red
@@ -339,7 +339,7 @@ function Invoke-CampusLogin {
     Write-Host "    账号: $($profile.user_id)" -ForegroundColor White
     Write-Host "    运营商: $(Get-OperatorName $profile.operator)" -ForegroundColor White
     Write-Host "    认证地址: $($profile.base_url)" -ForegroundColor White
-    Write-Host "    SSID: $($profile.ssid)" -ForegroundColor White
+    Write-Host "    SSID: $ssid" -ForegroundColor White
     Write-Host ""
 
     # 1. 拿运行时网络信息
@@ -347,6 +347,8 @@ function Invoke-CampusLogin {
     $localMac = Get-WirelessMacAddress
     if ($localIp)  { $wlanUserIp = $localIp }  else { $wlanUserIp = $profile.wlan_user_ip }
     if ($localMac) { $macAddress = $localMac } else { $macAddress = $profile.mac_address }
+    # ssid 可选: 留空时运行时自动检测当前连接的 WiFi
+    $ssid = if (-not [string]::IsNullOrWhiteSpace($profile.ssid)) { $profile.ssid } else { Get-CurrentSsid }
 
     # 2. WiFi 状态检查
     if (-not (Is-SsidConnected $profile.ssid)) {
@@ -387,7 +389,7 @@ function Invoke-CampusLogin {
         "wlanuserip=$(Safe-UriEscape $wlanUserIp)",
         "wlanacname=$(Safe-UriEscape $profile.wlan_ac_name)",
         "wlanacIp=$(Safe-UriEscape $profile.wlan_ac_ip)",
-        "ssid=$(Safe-UriEscape $profile.ssid)",
+        "ssid=$(Safe-UriEscape $ssid)",
         "vlan=$(Safe-UriEscape $profile.vlan)",
         "mac=$(Safe-UriEscape $macAddress)",
         "version=$(Safe-UriEscape $version)",

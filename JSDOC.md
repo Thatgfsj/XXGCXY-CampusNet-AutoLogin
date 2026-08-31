@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.0.1 |
+| **当前版本** | 2.0.2 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -71,7 +71,7 @@ XXGCXY-CampusNet-AutoLogin/
 │       └── build-linux.yml        # Linux .deb 构建工作流（仅 tag 触发）
 │
 ├── index.html                     # 前端单页应用（~1580行），含完整 CSS + JS
-├── package.json                   # Node.js 项目配置 (campus-wifi, 2.0.1)
+├── package.json                   # Node.js 项目配置 (campus-wifi, 2.0.2)
 ├── package-lock.json              # 依赖锁定文件
 │
 ├── xywdl.ps1                      # ★ 核心认证脚本（~500行，函数式，含三层降级发送）
@@ -96,7 +96,7 @@ XXGCXY-CampusNet-AutoLogin/
 │   └── test_sh_judge.sh           # xywdl.sh 认证判定逻辑测试（11 项）
 │
 └── src-tauri/                     # Tauri 后端（Rust）
-    ├── Cargo.toml                 # Rust 包配置 (app, 2.0.1)
+    ├── Cargo.toml                 # Rust 包配置 (app, 2.0.2)
     ├── Cargo.lock                 # 依赖锁定
     ├── build.rs                   # 构建脚本（复制 WebView2Loader.dll）
     ├── tauri.conf.json            # Tauri 配置（窗口、打包、NSIS、插件权限）
@@ -702,6 +702,10 @@ AC → 放行该 IP/MAC → 客户端可以上网
 
 ---
 ## 9. 版本历史
+
+- **v2.0.2**：修复 SSID 留空导致无法登录。
+  - **修复登录无法使用（根因）**：`xywdl.ps1` 的 `Load-LoginProfile` 把 `ssid` 列为必填字段，但 UI 允许（且高级字段引导）SSID 留空。留空时脚本直接报"缺少字段: ssid"并 `exit 2`，登录请求根本没发出去。修法：将 `ssid` 移出必填列表，运行时由 `Get-CurrentSsid()` 自动取当前连接的 WiFi SSID 兜底；未连接任何 WiFi 时仍为空则提示用户填写。
+  - **版本号升到 2.0.2**（package.json / Cargo.toml / tauri.conf.json / build-all.yml / JSDOC / README）。
 
 - **v2.0.1**：修复桌面端登录脚本卡死 + 超时优化 + 日志回显。
   - **修复 bat 失败路径永久挂死（根因）**：`xywdl.bat` 在 PowerShell 脚本非零退出时无条件执行 `pause`。桌面端调用带 `--non-interactive`，无控制台时 `pause` 永久挂起——表现为 UI 日志"正在执行登录脚本..."后 20 多秒无回显、任务堆积。修法：bat 检测到 `non-interactive` 参数时跳过所有 `pause`，失败直接返回退出码。
