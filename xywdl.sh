@@ -156,7 +156,7 @@ RESPONSE=""
 # 第 1 层: curl (默认主力, 带 noproxy 避免系统代理干扰)
 if curl --version >/dev/null 2>&1; then
     HTTP_CODE=$(curl -s -o /tmp/xywdl_response.txt -w "%{http_code}" \
-        --max-redirs 0 --noproxy '*' --max-time 15 \
+        --max-redirs 0 --noproxy '*' --max-time 30 \
         "$REQUEST_URL" 2>/dev/null || echo "000")
     # 000 = 连接层失败; 4xx/5xx 也算"发出去了", body 交给判定
     if [[ "$HTTP_CODE" != "000" ]]; then

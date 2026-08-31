@@ -1248,11 +1248,19 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             .output()
             .await
             .map_err(|e| format!("执行登录脚本失败: {}", e))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if output.status.success() {
-            Ok("登录脚本执行成功".to_string())
+            // 把脚本 stdout 一并返回, 方便 UI 日志看到发送层/响应细节
+            let detail = if stdout.trim().is_empty() {
+                "登录脚本执行成功".to_string()
+            } else {
+                format!("登录脚本执行成功: {}", stdout.trim())
+            };
+            Ok(detail)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Err(format!("登录脚本执行失败: {}", stderr))
+            let combined = format!("{}{}", stderr, stdout);
+            Err(format!("登录脚本执行失败: {}", combined.trim()))
         }
     }
 
@@ -1266,12 +1274,18 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             .output()
             .await
             .map_err(|e| format!("执行登录脚本失败: {}", e))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if output.status.success() {
-            Ok("登录脚本执行成功".to_string())
+            let detail = if stdout.trim().is_empty() {
+                "登录脚本执行成功".to_string()
+            } else {
+                format!("登录脚本执行成功: {}", stdout.trim())
+            };
+            Ok(detail)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            Err(format!("登录脚本执行失败: {} {}", stderr, stdout))
+            let combined = format!("{}{}", stderr, stdout);
+            Err(format!("登录脚本执行失败: {}", combined.trim()))
         }
     }
 }

@@ -86,7 +86,7 @@ def main() -> int:
         })
 
         try:
-            with opener.open(req, timeout=15) as resp:
+            with opener.open(req, timeout=30) as resp:
                 raw = resp.read()
                 content_type = resp.headers.get("Content-Type", "")
                 sys.stdout.write(decode_body(raw, content_type))

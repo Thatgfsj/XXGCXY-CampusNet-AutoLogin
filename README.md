@@ -121,6 +121,7 @@ npx @tauri-apps/cli build
 
 ## 更新日志
 
+- **v2.0.1**：修复桌面端调用登录脚本时 bat 失败路径的 `pause` 永久挂死；发送超时统一改为 30 秒；登录脚本实际输出回显到 UI 日志。
 - **v2.0.0**：修复登录无法使用（MAC 留空被误判为缺少字段）、请求发送多层级降级（Windows: PowerShell→C#→Python；Linux: curl→Python）、跨平台 Python 保底层、Portal URL 解析按钮防连点、清理死代码。详见 [JSDOC.md §9](JSDOC.md)。
 - **v1.9.1**：修复认证结果判定正则误匹配（`code:10/100/123` 被误判为“账号不存在”、`code:440` 被误判为“非法接入”）、请求日志脱敏密码（`passwd=***`）、统一 PS 端参数 URL 编码；新增自动化测试套件（`tests/`）与 Rust 单元测试。详见 [JSDOC.md §9](JSDOC.md)。
 - **v1.9.0**：登录模块解耦为 JSON 模板 + 渲染器；可视化登录配置屏；DPAPI 加密密码；取消内置 PS7。

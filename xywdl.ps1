@@ -411,7 +411,7 @@ function Invoke-CampusLogin {
 
     # 4.1 第 1 层: PowerShell Invoke-WebRequest (默认主力)
     try {
-        $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop -Proxy $null
+        $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop -Proxy $null
         $body = $response.Content
         $sendSource = "PowerShell (Invoke-WebRequest)"
     } catch {

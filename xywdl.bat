@@ -13,6 +13,10 @@ set "SCRIPT_DIR=%~dp0"
 set "PS_SCRIPT=%SCRIPT_DIR%xywdl.ps1"
 set "PS_EXE="
 
+REM 非交互模式 (桌面端调用): 跳过所有 pause, 避免无控制台时永久挂死
+set "INTERACTIVE=1"
+echo %* | findstr /i "non-interactive" >nul && set "INTERACTIVE=0"
+
 REM 去除路径末尾的反斜杠
 for %%a in ("%SCRIPT_DIR%") do set "SCRIPT_DIR=%%~fa"
 set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
@@ -25,7 +29,7 @@ if not exist "%PS_SCRIPT%" (
     echo [错误] 找不到 PowerShell 脚本: %PS_SCRIPT%
     echo.
     echo 请确保 xywdl.ps1 与 xywdl.bat 在同一目录下
-    pause
+    if "%INTERACTIVE%"=="1" pause
     exit /b 1
 )
 
@@ -46,7 +50,7 @@ for /f "delims=" %%v in ('%PS_EXE% -NoProfile -Command "$PSVersionTable.PSVersio
 if "%PS_VER%"=="" (
     echo [错误] 无法检测 PowerShell 版本, 请检查 PowerShell 是否正常工作
     echo   提示: 打开 cmd 跑 "powershell -Command \"`$PSVersionTable.PSVersion\""
-    pause
+    if "%INTERACTIVE%"=="1" pause
     exit /b 1
 )
 echo [信息] PowerShell 版本: %PS_VER%
@@ -64,7 +68,7 @@ if %PS_MAJOR% LSS 5 (
     echo Windows 7 用户需要手动安装 WMF 5.1:
     echo   https://www.microsoft.com/en-us/download/details.aspx?id=54616
     echo Windows 10/11 用户已自带 PowerShell 5.1, 如果检测不到请检查 PATH
-    pause
+    if "%INTERACTIVE%"=="1" pause
     exit /b 1
 )
 if %PS_MAJOR% EQU 5 if %PS_MINOR% LSS 1 (
@@ -72,7 +76,7 @@ if %PS_MAJOR% EQU 5 if %PS_MINOR% LSS 1 (
     echo.
     echo Windows 7/8 用户需要手动安装 WMF 5.1:
     echo   https://www.microsoft.com/en-us/download/details.aspx?id=54616
-    pause
+    if "%INTERACTIVE%"=="1" pause
     exit /b 1
 )
 
@@ -89,7 +93,7 @@ if %EXIT_CODE% neq 0 (
     echo   1. 确保已连接校园网 WiFi
     echo   2. 检查 PowerShell 是否正常工作 (在 cmd 跑 powershell -Command "$PSVersionTable.PSVersion")
     echo   3. 尝试以管理员身份运行
-    pause
+    if "%INTERACTIVE%"=="1" pause
     exit /b %EXIT_CODE%
 )
 

@@ -58,8 +58,8 @@ class XywdlSender
             HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = "GET";
             req.Proxy = null;                 // 直连, 绕开系统代理
-            req.Timeout = 15000;              // 连接超时 (毫秒)
-            req.ReadWriteTimeout = 15000;     // 读响应超时 (毫秒)
+            req.Timeout = 30000;              // 连接超时 (毫秒)
+            req.ReadWriteTimeout = 30000;     // 读响应超时 (毫秒)
             req.AllowAutoRedirect = false;    // 不跟随重定向, 看原始响应
             req.UserAgent = "XXGCXY-CampusNet-AutoLogin/2.0";
             req.Accept = "text/html,application/json,*/*";
