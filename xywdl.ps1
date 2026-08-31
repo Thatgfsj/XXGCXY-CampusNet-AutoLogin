@@ -339,23 +339,41 @@ function Invoke-CampusLogin {
     Write-Host "    账号: $($profile.user_id)" -ForegroundColor White
     Write-Host "    运营商: $(Get-OperatorName $profile.operator)" -ForegroundColor White
     Write-Host "    认证地址: $($profile.base_url)" -ForegroundColor White
-    Write-Host "    SSID: $ssid" -ForegroundColor White
+    Write-Host ""
+    Write-Host "[*] 开始执行登录流程..." -ForegroundColor Yellow
     Write-Host ""
 
     # 1. 拿运行时网络信息
+    Write-Host "[步骤 1/5] 获取运行时网络信息..." -ForegroundColor Cyan
     $localIp = Get-WifiIpAddress
     $localMac = Get-WirelessMacAddress
+    Write-Host "    检测到本地 IP: $(if($localIp){$localIp}else{'未获取'})" -ForegroundColor Gray
+    Write-Host "    检测到本地 MAC: $(if($localMac){$localMac}else{'未获取'})" -ForegroundColor Gray
     if ($localIp)  { $wlanUserIp = $localIp }  else { $wlanUserIp = $profile.wlan_user_ip }
     if ($localMac) { $macAddress = $localMac } else { $macAddress = $profile.mac_address }
     # ssid 可选: 留空时运行时自动检测当前连接的 WiFi
     $ssid = if (-not [string]::IsNullOrWhiteSpace($profile.ssid)) { $profile.ssid } else { Get-CurrentSsid }
+    Write-Host "    使用 SSID: $ssid" -ForegroundColor Gray
+    Write-Host "    使用 IP: $wlanUserIp" -ForegroundColor Gray
+    Write-Host "    使用 MAC: $macAddress" -ForegroundColor Gray
+    Write-Host "[步骤 1/5] 完成" -ForegroundColor Green
+    Write-Host ""
 
     # 2. WiFi 状态检查
+    Write-Host "[步骤 2/5] 检查 WiFi 连接状态..." -ForegroundColor Cyan
+    $currentSsid = Get-CurrentSsid
+    Write-Host "    当前连接的 WiFi: $currentSsid" -ForegroundColor Gray
     if (-not (Is-SsidConnected $profile.ssid)) {
+        Write-Host "    WiFi 不匹配目标 SSID,尝试重连..." -ForegroundColor Yellow
         Reconnect-ToSsid $profile.ssid
+    } else {
+        Write-Host "    WiFi 已连接目标 SSID,跳过重连" -ForegroundColor Gray
     }
+    Write-Host "[步骤 2/5] 完成" -ForegroundColor Green
+    Write-Host ""
 
     # 3. 构造 quickauth.do URL
+    Write-Host "[步骤 3/5] 构造认证请求 URL..." -ForegroundColor Cyan
     $hostname = if ($profile.hostname) { $profile.hostname } else { $env:COMPUTERNAME }
     $portalPageId = if ($profile.portal_page_id) { $profile.portal_page_id } else { "3" }
     $portalType   = if ($profile.portal_type)    { $profile.portal_type }    else { "0" }
@@ -363,6 +381,7 @@ function Invoke-CampusLogin {
     $bindCtrlId   = if ($profile.bind_ctrl_id)   { $profile.bind_ctrl_id }   else { "" }
 
     $authUrl = $profile.base_url -replace '/\w+\.do', '/quickauth.do'
+    Write-Host "    认证 URL: $authUrl" -ForegroundColor Gray
 
     # 烟囱 29.2 修复: [Uri]::EscapeDataString 对超长字符串会抛 UriFormatException
     # 用 try/catch 包裹, 失败时退化为 PowerShell 自带 [uri]::EscapeDataString / [Web.HttpUtility]::UrlEncode
@@ -403,25 +422,40 @@ function Invoke-CampusLogin {
     $requestUrl = $authUrl + "?" + $queryParams
     # 安全: 不要在日志/控制台打印明文密码, 只显示脱敏后的 passwd=***
     $maskedUrl = $requestUrl -replace '(?i)(passwd=)[^&]*', '$1***'
-    Write-Host "[*] 请求: $maskedUrl" -ForegroundColor Gray
+    Write-Host "[步骤 3/5] 完成" -ForegroundColor Green
+    Write-Host ""
 
     # 4. 发送 (三层降级: PowerShell → C# sender → Python sender)
     # 每层失败都会记录原因, 自动尝试下一层; 只有三层全失败才报错。
+    Write-Host "[步骤 4/5] 发送认证请求 (三层降级)..." -ForegroundColor Cyan
     $body = $null
     $sendSource = ""
     $sendErrors = @()
 
     # 4.1 第 1 层: PowerShell Invoke-WebRequest (默认主力)
+    Write-Host "    [第 1 层] PowerShell Invoke-WebRequest..." -ForegroundColor Gray
     try {
+        Write-Host "      发送请求: $maskedUrl" -ForegroundColor DarkGray
         $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop -Proxy $null
         $body = $response.Content
         $sendSource = "PowerShell (Invoke-WebRequest)"
+        Write-Host "      [第 1 层] 成功, 响应长度: $($body.Length) 字符" -ForegroundColor Green
+    } catch [System.Net.WebException] {
+        $errMsg = $_.Exception.Message
+        $statusCode = ""
+        if ($_.Exception.Response -ne $null -and $_.Exception.Response.StatusCode -ne $null) {
+            $statusCode = " (HTTP $($_.Exception.Response.StatusCode))"
+        }
+        $sendErrors += "PowerShell: $errMsg$statusCode"
+        Write-Host "      [第 1 层] 失败: $errMsg$statusCode" -ForegroundColor Red
     } catch {
         $sendErrors += "PowerShell: $($_.Exception.Message)"
+        Write-Host "      [第 1 层] 失败: $($_.Exception.Message)" -ForegroundColor Red
     }
 
     # 4.2 第 2 层: C# sender (xywdl_sender.exe, .NET Framework 4.x, Win7+ 自带运行时)
     if ($null -eq $body) {
+        Write-Host "    [第 2 层] C# sender (xywdl_sender.exe)..." -ForegroundColor Gray
         $senderExe = $null
         foreach ($cand in @(
                 (Join-Path $PSScriptRoot "src\sender\xywdl_sender.exe"),
@@ -430,6 +464,7 @@ function Invoke-CampusLogin {
             if (Test-Path -LiteralPath $cand) { $senderExe = $cand; break }
         }
         if ($senderExe) {
+            Write-Host "      找到发送器: $senderExe" -ForegroundColor Gray
             try {
                 # 完整 URL 通过 stdin 传给 sender, 避免明文密码出现在进程命令行
                 $rawOut = $requestUrl | & $senderExe 2>&1
@@ -437,19 +472,25 @@ function Invoke-CampusLogin {
                 if ($exitCode -eq 0) {
                     $body = ($rawOut | Out-String).Trim()
                     $sendSource = "C# ($([System.IO.Path]::GetFileName($senderExe)))"
+                    Write-Host "      [第 2 层] 成功, 响应长度: $($body.Length) 字符" -ForegroundColor Green
                 } else {
-                    $sendErrors += "C#: exit=$exitCode $($rawOut | Out-String)"
+                    $errDetail = ($rawOut | Out-String).Trim()
+                    $sendErrors += "C#: exit=$exitCode $errDetail"
+                    Write-Host "      [第 2 层] 失败: exit=$exitCode $errDetail" -ForegroundColor Red
                 }
             } catch {
                 $sendErrors += "C#: $($_.Exception.Message)"
+                Write-Host "      [第 2 层] 异常: $($_.Exception.Message)" -ForegroundColor Red
             }
         } else {
-            $sendErrors += "C#: 未找到 xywdl_sender.exe"
+            $sendErrors += "C#: 未找到 xywdl_sender.exe (检查 src/sender/ 目录)"
+            Write-Host "      [第 2 层] 未找到 xywdl_sender.exe" -ForegroundColor Yellow
         }
     }
 
     # 4.3 第 3 层: Python sender (sender.py, 纯标准库, 跨平台最强保底)
     if ($null -eq $body) {
+        Write-Host "    [第 3 层] Python sender (sender.py)..." -ForegroundColor Gray
         $pyScript = $null
         foreach ($cand in @(
                 (Join-Path $PSScriptRoot "src\sender\sender.py"),
@@ -461,52 +502,74 @@ function Invoke-CampusLogin {
         # 跳过 WindowsApps 商店占位 stub (运行返回 9009 的假 python)
         $py = $null
         $pyArgs = @()
-        foreach ($c in @(
-                @{ Name = "py";    Args = @("-3") },
-                @{ Name = "python"; Args = @() },
-                @{ Name = "python3"; Args = @() }
-            )) {
+        $pyCandidates = @(
+            @{ Name = "py";    Args = @("-3") },
+            @{ Name = "python"; Args = @() },
+            @{ Name = "python3"; Args = @() }
+        )
+        foreach ($c in $pyCandidates) {
             $cmd = Get-Command $c.Name -ErrorAction SilentlyContinue
-            if (-not $cmd) { continue }
+            if (-not $cmd) {
+                Write-Host "      Python 候选 '$($c.Name)': 未找到" -ForegroundColor DarkGray
+                continue
+            }
             try {
                 $probe = & $cmd.Source @($c.Args) -c "import sys; print('PYOK')" 2>$null
                 if ($LASTEXITCODE -eq 0 -and ($probe -join '') -match 'PYOK') {
                     $py = $cmd.Source
                     $pyArgs = @($c.Args)
+                    Write-Host "      使用 Python: $($py.Name) (参数: $($pyArgs -join ' '))" -ForegroundColor Gray
                     break
                 }
+                Write-Host "      Python 候选 '$($c.Name)': 探测失败 (exit=$LASTEXITCODE)" -ForegroundColor DarkGray
                 $sendErrors += "Python: $($c.Name) 不可用 (exit=$LASTEXITCODE)"
             } catch {
+                Write-Host "      Python 候选 '$($c.Name)': 启动失败" -ForegroundColor DarkGray
                 $sendErrors += "Python: $($c.Name) 启动失败: $($_.Exception.Message)"
             }
         }
         if ($pyScript -and $py) {
             try {
+                Write-Host "      发送请求: $maskedUrl" -ForegroundColor DarkGray
                 $rawOut = $requestUrl | & $py @pyArgs $pyScript 2>&1
                 $exitCode = $LASTEXITCODE
                 if ($exitCode -eq 0) {
                     $body = ($rawOut | Out-String).Trim()
                     $sendSource = "Python (sender.py)"
+                    Write-Host "      [第 3 层] 成功, 响应长度: $($body.Length) 字符" -ForegroundColor Green
                 } else {
-                    $sendErrors += "Python: exit=$exitCode $($rawOut | Out-String)"
+                    $errDetail = ($rawOut | Out-String).Trim()
+                    $sendErrors += "Python: exit=$exitCode $errDetail"
+                    Write-Host "      [第 3 层] 失败: exit=$exitCode $errDetail" -ForegroundColor Red
                 }
             } catch {
                 $sendErrors += "Python: $($_.Exception.Message)"
+                Write-Host "      [第 3 层] 异常: $($_.Exception.Message)" -ForegroundColor Red
             }
         } else {
             $sendErrors += "Python: 未找到可用的 python 解释器或 sender.py"
+            Write-Host "      [第 3 层] 未找到可用的 python 解释器或 sender.py" -ForegroundColor Yellow
         }
     }
+    Write-Host "[步骤 4/5] 完成" -ForegroundColor Green
+    Write-Host ""
 
     # 5. 判定结果 (三层共用同一套判定逻辑)
+    Write-Host "[步骤 5/5] 判定认证结果..." -ForegroundColor Cyan
     if ($null -eq $body) {
         Write-Host "[!] 所有发送层均失败,请检查网络/代理设置:" -ForegroundColor Red
+        Write-Host "    失败详情:" -ForegroundColor Red
         foreach ($e in $sendErrors) { Write-Host "      - $e" -ForegroundColor Red }
+        Write-Host ""
+        Write-Host "[!] 卡在: 步骤 4/5 发送认证请求 - 三层全部失败" -ForegroundColor Red
+        Write-Host "    可能原因: 网络不通、代理拦截、防火墙阻止" -ForegroundColor Yellow
         return 99
     }
 
     Write-Host "[*] 发送层: $sendSource" -ForegroundColor Cyan
-    Write-Host "[*] 响应: $body" -ForegroundColor White
+    Write-Host "[*] 响应体: $body" -ForegroundColor White
+    Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
+    Write-Host ""
 
     # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
     # "code":1 (账号不存在), "code":440 会被误判成 "code":44 (非法接入)。
@@ -515,12 +578,16 @@ function Invoke-CampusLogin {
         return 0
     } elseif ($body -match '"code"\s*:\s*1(?!\d)' -or $body -match "账号不存在") {
         Write-Host "[!] 认证失败:账号不存在,请检查学号和运营商" -ForegroundColor Red
+        Write-Host "[!] 卡在: 步骤 5/5 认证失败 - 账号不存在" -ForegroundColor Red
         return 1
     } elseif ($body -match '"code"\s*:\s*44(?!\d)' -or $body -match "非法接入") {
         Write-Host "[!] 认证失败:非法接入,请检查 VLAN / MAC" -ForegroundColor Red
+        Write-Host "[!] 卡在: 步骤 5/5 认证失败 - 非法接入" -ForegroundColor Red
         return 44
     } else {
         Write-Host "[!] 认证结果未知,请检查账号密码" -ForegroundColor Yellow
+        Write-Host "[!] 卡在: 步骤 5/5 认证结果未知" -ForegroundColor Yellow
+        Write-Host "    响应体: $body" -ForegroundColor Yellow
         return 99
     }
 }
@@ -528,15 +595,54 @@ function Invoke-CampusLogin {
 # ============= 主流程 =============
 
 try {
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "  校园网自动登录脚本 (v1.9.0+)" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "[*] 步骤 0: 加载登录配置..." -ForegroundColor Yellow
     $profile = Load-LoginProfile
     if ($null -eq $profile) {
+        Write-Host "[!] 卡在: 步骤 0 - 登录配置加载失败" -ForegroundColor Red
+        Write-Host "    可能原因: 配置缺失、密码文件不存在、JSON 格式错误" -ForegroundColor Yellow
         exit 2
     }
+    Write-Host "[*] 配置加载成功" -ForegroundColor Green
+    Write-Host "    学号: $($profile.user_id)" -ForegroundColor Gray
+    Write-Host "    运营商: $(Get-OperatorName $profile.operator)" -ForegroundColor Gray
+    Write-Host "    Portal URL: $($profile.base_url)" -ForegroundColor Gray
+    Write-Host "    VLAN: $($profile.vlan)" -ForegroundColor Gray
+    Write-Host "    SSID: $($profile.ssid)" -ForegroundColor Gray
+    Write-Host "    AC 名称: $($profile.wlan_ac_name)" -ForegroundColor Gray
+    Write-Host "    AC IP: $($profile.wlan_ac_ip)" -ForegroundColor Gray
+    Write-Host ""
+
+    Write-Host "[*] 步骤 0.5: 解密密码..." -ForegroundColor Yellow
     $password = Get-LoginPassword
     if ($null -eq $password) {
+        Write-Host "[!] 卡在: 步骤 0.5 - 密码解密失败" -ForegroundColor Red
+        Write-Host "    可能原因: credential 文件损坏、DPAPI 加密钥匙不匹配" -ForegroundColor Yellow
         exit 3
     }
+    Write-Host "[*] 密码解密成功 (已隐藏)" -ForegroundColor Green
+    Write-Host ""
+
+    Write-Host "[*] 步骤 1: 执行校园网认证..." -ForegroundColor Yellow
     $code = Invoke-CampusLogin -profile $profile -password $password
+    Write-Host ""
+    if ($code -eq 0) {
+        Write-Host "[+] 登录成功!" -ForegroundColor Green
+    } elseif ($code -eq 1) {
+        Write-Host "[!] 登录失败: 账号不存在" -ForegroundColor Red
+        Write-Host "[!] 卡在: 认证失败 - 账号不存在" -ForegroundColor Red
+    } elseif ($code -eq 44) {
+        Write-Host "[!] 登录失败: 非法接入" -ForegroundColor Red
+        Write-Host "[!] 卡在: 认证失败 - 非法接入 (VLAN/MAC 不匹配)" -ForegroundColor Red
+    } elseif ($code -eq 99) {
+        Write-Host "[!] 登录失败: 未知错误" -ForegroundColor Red
+    } else {
+        Write-Host "[!] 登录失败: 未知返回码 $code" -ForegroundColor Red
+    }
+
     if ($args -contains '--non-interactive') {
         # 自动调用模式:直接退出,带返回码
         exit $code
@@ -546,8 +652,10 @@ try {
         exit $code
     }
 } catch {
+    Write-Host ""
     Write-Host "[!] 脚本执行出错: $($_.Exception.Message)" -ForegroundColor Red
     Write-Host "    $($_.ScriptStackTrace)" -ForegroundColor DarkGray
+    Write-Host "[!] 卡在: 脚本异常中断" -ForegroundColor Red
     if ($args -notcontains '--non-interactive') {
         Read-Host "`n按 Enter 键退出" | Out-Null
     }

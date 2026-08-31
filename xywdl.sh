@@ -84,18 +84,50 @@ done
 # 读密码 (Linux 上是明文)
 PASSWORD=$(cat "$CRED_FILE")
 
-log_info "账号: $USER_ID"
-log_info "运营商: $OPERATOR"
-log_info "认证地址: $BASE_URL"
-log_info "SSID: $SSID"
 echo ""
+log_info "========================================"
+log_info "  校园网自动登录脚本 (Linux版, v1.9.0+)"
+log_info "========================================"
+log_info ""
+log_info "[*] 步骤 0: 加载登录配置..."
+log_info "    学号: $USER_ID"
+log_info "    运营商: $OPERATOR"
+log_info "    Portal URL: $BASE_URL"
+log_info "    VLAN: $VLAN"
+log_info "    SSID: $SSID"
+log_info "    AC 名称: $WLAN_AC_NAME"
+log_info "    AC IP: $WLAN_AC_IP"
 
-# 运行时 IP / MAC 兜底
+# 校验必需字段
+# mac_address / wlan_user_ip 是可选的: UI 允许留空, 运行时由本机自动取兜底
+for f in "user_id:$USER_ID" "base_url:$BASE_URL" "vlan:$VLAN"; do
+    key="${f%%:*}"
+    val="${f#*:}"
+    if [[ -z "$val" ]]; then
+        log_error "[!] 卡在: 步骤 0 - 登录配置缺少字段: $key"
+        exit 2
+    fi
+done
+log_info "[*] 步骤 0 完成 - 配置验证通过"
+log_info ""
+
+log_info "[*] 步骤 0.5: 读取密码..."
+if [[ -z "$PASSWORD" ]]; then
+    log_error "[!] 卡在: 步骤 0.5 - 密码文件为空"
+    exit 3
+fi
+log_info "[*] 步骤 0.5 完成 - 密码读取成功 (已隐藏)"
+log_info ""
+
+log_info "[*] 步骤 1: 获取运行时网络信息..."
+log_info "    当前 SSID: $SSID"
 if [[ -z "$WLAN_USER_IP" ]]; then
     WLAN_USER_IP=$(ip route get 1 2>/dev/null | grep -oP 'src \K[^ ]+' | head -1)
 fi
 if [[ -z "$WLAN_USER_IP" ]]; then
     log_warn "[*] 拿不到本机 IP, wlanuserip 留空"
+else
+    log_info "    本机 IP: $WLAN_USER_IP"
 fi
 
 LIVE_MAC=""
@@ -110,9 +142,12 @@ if [[ -n "$LIVE_MAC" ]]; then
 else
     MAC=$(echo "$PROFILE_MAC" | tr '[:upper:]' '[:lower:]')
 fi
-log_info "[*] 使用 MAC: $MAC"
+log_info "    本机 MAC: $MAC"
+log_info "[*] 步骤 1 完成"
+log_info ""
 
 # 构造 quickauth.do URL
+log_info "[*] 步骤 2: 构造认证请求 URL..."
 AUTH_URL=$(echo "$BASE_URL" | sed -E 's|/[A-Za-z0-9_-]+\.do$|/quickauth.do|')
 [[ -z "$HOSTNAME_VAL" ]] && HOSTNAME_VAL=$(hostname)
 
@@ -147,14 +182,17 @@ print(urllib.parse.urlencode(params))
 ")
 
 REQUEST_URL="${AUTH_URL}?${QUERY}"
-log_info "[*] 请求: $REQUEST_URL"
+log_info "[*] 步骤 2 完成"
+log_info ""
 
 # 发送 (两层降级: curl → python3 sender.py)
 # 完整 URL 通过 stdin 传给 sender, 避免明文密码出现在进程命令行
+log_info "[*] 步骤 3: 发送认证请求 (两层降级)..."
 RESPONSE=""
 
 # 第 1 层: curl (默认主力, 带 noproxy 避免系统代理干扰)
 if curl --version >/dev/null 2>&1; then
+    log_info "    [第 1 层] curl..."
     HTTP_CODE=$(curl -s -o /tmp/xywdl_response.txt -w "%{http_code}" \
         --max-redirs 0 --noproxy '*' --max-time 30 \
         "$REQUEST_URL" 2>/dev/null || echo "000")
@@ -162,34 +200,41 @@ if curl --version >/dev/null 2>&1; then
     if [[ "$HTTP_CODE" != "000" ]]; then
         RESPONSE=$(cat /tmp/xywdl_response.txt 2>/dev/null || echo "")
         rm -f /tmp/xywdl_response.txt
-        log_info "[*] 发送层: curl (HTTP $HTTP_CODE)"
+        log_info "    [第 1 层] 成功, HTTP 状态码: $HTTP_CODE"
     else
-        log_warn "[*] curl 发送失败, 降级到 python3..."
+        log_warn "    [第 1 层] curl 发送失败 (HTTP_CODE=000), 降级到 python3..."
     fi
 else
-    log_warn "[*] 未找到 curl, 使用 python3 发送..."
+    log_warn "    未找到 curl, 直接使用 python3..."
 fi
 
 # 第 2 层: python3 sender.py (纯标准库, 跨平台最强保底)
 if [[ -z "$RESPONSE" ]]; then
+    log_info "    [第 2 层] python3 sender.py..."
     PY_SENDER="$SCRIPT_DIR/src/sender/sender.py"
     if [[ ! -f "$PY_SENDER" ]]; then
         PY_SENDER="$SCRIPT_DIR/sender.py"
     fi
     if command -v python3 >/dev/null 2>&1 && [[ -f "$PY_SENDER" ]]; then
-        if RESPONSE=$(printf '%s' "$REQUEST_URL" | python3 "$PY_SENDER" 2>/dev/null); then
-            log_info "[*] 发送层: python3 (sender.py)"
+        if RESPONSE=$(printf '%s' "$REQUEST_URL" | python3 "$PY_SENDER" 2>/tmp/xywdl_py_err.txt); then
+            log_info "    [第 2 层] 成功"
+            rm -f /tmp/xywdl_py_err.txt
         else
-            log_error "[!] python3 发送失败"
+            PY_ERR=$(cat /tmp/xywdl_py_err.txt 2>/dev/null)
+            rm -f /tmp/xywdl_py_err.txt
+            log_error "[!] 卡在: 步骤 3 - python3 sender.py 失败: $PY_ERR"
             exit 99
         fi
     else
-        log_error "[!] 所有发送层均失败 (无 curl 且无 python3/sender.py)"
+        log_error "[!] 卡在: 步骤 3 - 所有发送层均失败 (无 curl 且无 python3/sender.py)"
         exit 99
     fi
 fi
+log_info "[*] 步骤 3 完成"
+log_info ""
 
-log_info "[*] 响应: $RESPONSE"
+log_info "[*] 步骤 4: 判定认证结果..."
+log_info "    响应: $RESPONSE"
 
 # 判定结果 (跟 PS 端一致)
 # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
@@ -202,13 +247,13 @@ if echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*0([^0-9]|$)' \
     exit 0
 elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*1([^0-9]|$)' \
      || echo "$RESPONSE" | grep -q "账号不存在"; then
-    log_error "[!] 认证失败:账号不存在"
+    log_error "[!] 卡在: 步骤 4 - 认证失败:账号不存在"
     exit 1
 elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*44([^0-9]|$)' \
      || echo "$RESPONSE" | grep -q "非法接入"; then
-    log_error "[!] 认证失败:非法接入"
+    log_error "[!] 卡在: 步骤 4 - 认证失败:非法接入 (VLAN/MAC 不匹配)"
     exit 44
 else
-    log_warn "[!] 认证结果未知"
+    log_warn "[!] 卡在: 步骤 4 - 认证结果未知"
     exit 99
 fi
