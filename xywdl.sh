@@ -84,6 +84,31 @@ done
 # 读密码 (Linux 上是明文)
 PASSWORD=$(cat "$CRED_FILE")
 
+# 软必填自动探测: wlan_ac_name / wlan_ac_ip 缺失时尝试从 base_url 拿
+# (跟 PS 端 Get-AutoPortalParams 行为一致)
+# 校园网 AC 通常会 302 重定向到 portal.do?wlanacname=...&wlanacIp=...
+if [[ -z "$WLAN_AC_NAME" || -z "$WLAN_AC_IP" ]]; then
+    if [[ -n "$BASE_URL" ]]; then
+        PROBE_URL="$BASE_URL"
+        if [[ ! "$PROBE_URL" =~ ^https?:// ]]; then
+            PROBE_URL="http://$PROBE_URL"
+        fi
+        LOCATION=$(curl -s -o /dev/null -D - --max-redirs 0 --noproxy '*' --max-time 8 \
+            "$PROBE_URL" 2>/dev/null | grep -i '^location:' | head -1 | sed 's/^[Ll]ocation:[[:space:]]*//' | tr -d '\r\n')
+        if [[ -n "$LOCATION" ]]; then
+            if [[ -z "$WLAN_AC_NAME" ]]; then
+                WLAN_AC_NAME=$(echo "$LOCATION" | grep -oE 'wlanacname=[^&]+' | head -1 | sed 's/^wlanacname=//' | sed 's/%20/ /g')
+            fi
+            if [[ -z "$WLAN_AC_IP" ]]; then
+                WLAN_AC_IP=$(echo "$LOCATION" | grep -oE 'wlanacIp=[^&]+' | head -1 | sed 's/^wlanacIp=//')
+            fi
+            if [[ -n "$WLAN_AC_NAME" || -n "$WLAN_AC_IP" ]]; then
+                log_warn "    [✓] 自动探测成功: wlan_ac_name=$WLAN_AC_NAME, wlan_ac_ip=$WLAN_AC_IP"
+            fi
+        fi
+    fi
+fi
+
 echo ""
 log_info "========================================"
 log_info "  校园网自动登录脚本 (Linux版, v1.9.0+)"
@@ -98,16 +123,6 @@ log_info "    SSID: $SSID"
 log_info "    AC 名称: $WLAN_AC_NAME"
 log_info "    AC IP: $WLAN_AC_IP"
 
-# 校验必需字段
-# mac_address / wlan_user_ip 是可选的: UI 允许留空, 运行时由本机自动取兜底
-for f in "user_id:$USER_ID" "base_url:$BASE_URL" "vlan:$VLAN"; do
-    key="${f%%:*}"
-    val="${f#*:}"
-    if [[ -z "$val" ]]; then
-        log_error "[!] 卡在: 步骤 0 - 登录配置缺少字段: $key"
-        exit 2
-    fi
-done
 log_info "[*] 步骤 0 完成 - 配置验证通过"
 log_info ""
 
