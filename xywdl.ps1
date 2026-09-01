@@ -116,7 +116,7 @@ function Load-LoginProfile {
         # 拿到字段名 (兼容 hashtable 和 PSCustomObject)
         $fieldNames = if ($json -is [hashtable]) { $json.Keys } else { $json.PSObject.Properties.Name }
 
-        $required = @("user_id", "operator", "base_url", "vlan", "wlan_ac_name", "wlan_ac_ip")
+        $required = @("user_id", "operator", "base_url", "vlan")
         # wlan_user_ip / mac_address / ssid 是可选的: UI 允许留空,
         # 运行时由 Get-WifiIpAddress() / Get-WirelessMacAddress() / Get-CurrentSsid() 自动取本地值兜底
         foreach ($f in $required) {
@@ -125,9 +125,110 @@ function Load-LoginProfile {
                 return $null
             }
         }
+        # 软必填: wlan_ac_name / wlan_ac_ip 缺失时, 尝试从 base_url 触发 portal.do 重定向,
+        # 从 Location header 的 ?wlanacname=...&wlanacIp=... 提取并回填。
+        # 提取不到再降级为空串 (服务器可能拒, 但流程能跑下去, 用户能看到真实错误而非卡在配置加载)
+        $softRequired = @("wlan_ac_name", "wlan_ac_ip")
+        $missingSoft = @()
+        foreach ($f in $softRequired) {
+            if (-not ($fieldNames -contains $f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
+                $missingSoft += $f
+            }
+        }
+        if ($missingSoft.Count -gt 0) {
+            Write-Host "[*] 检测到可选字段缺失: $($missingSoft -join ', ') (将尝试自动探测)" -ForegroundColor Yellow
+            $autoFilled = Get-AutoPortalParams -baseUrl $json.base_url
+            if ($autoFilled) {
+                foreach ($f in $missingSoft) {
+                    if ($autoFilled.ContainsKey($f) -and -not [string]::IsNullOrWhiteSpace($autoFilled[$f])) {
+                        $json.$f = $autoFilled[$f]
+                        Write-Host "    [✓] 自动填入 $f = $($autoFilled[$f])" -ForegroundColor Green
+                    }
+                }
+            } else {
+                foreach ($f in $missingSoft) {
+                    if (-not ($json.PSObject.Properties.Name -contains $f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
+                        $json | Add-Member -NotePropertyName $f -NotePropertyValue "" -Force
+                        Write-Host "    [!] 自动探测失败, $f 留空 (可能登录会被服务器拒绝)" -ForegroundColor DarkYellow
+                    }
+                }
+            }
+        }
         return $json
     } catch {
         Write-Host "[!] 读取登录配置失败: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+}
+
+# ============= 自动探测 portal 参数 (wlan_ac_name / wlan_ac_ip) =============
+# 当用户保存配置时漏填了 wlan_ac_name / wlan_ac_ip, 尝试向 portal.do 发一次 HTTP GET,
+# 校园网 AC 通常会 302 重定向到 portal.do?wlanacname=...&wlanacIp=...&vlan=...&mac=...
+# 我们从 Location header 抓出 wlanacname / wlanacIp 回填到 profile。
+# 失败返回 $null (调用方会降级为空串)。
+
+function Get-AutoPortalParams {
+    param([string]$baseUrl)
+    if ([string]::IsNullOrWhiteSpace($baseUrl)) {
+        return $null
+    }
+    # 归一化: 如果 baseUrl 没有 http(s):// 前缀, 补上
+    $probeUrl = $baseUrl.Trim()
+    if ($probeUrl -notmatch '^https?://') {
+        $probeUrl = "http://$probeUrl"
+    }
+    Write-Host "    [*] 自动探测中: GET $probeUrl" -ForegroundColor DarkCyan
+    try {
+        # 不跟随重定向, 我们只读 Location header
+        $req = [System.Net.HttpWebRequest]::Create($probeUrl)
+        $req.Method = "GET"
+        $req.Timeout = 8000
+        $req.ReadWriteTimeout = 8000
+        $req.AllowAutoRedirect = $false
+        $req.UserAgent = "xxgcxy-wifi/2.0.3"
+        $req.KeepAlive = $false
+        $resp = $null
+        try {
+            $resp = $req.GetResponse()
+        } catch [System.Net.WebException] {
+            # 3xx 重定向被 .NET 视作 WebException
+            $resp = $_.Exception.Response
+        }
+        if ($null -eq $resp) {
+            Write-Host "    [!] 探测无响应" -ForegroundColor DarkYellow
+            return $null
+        }
+        $location = $resp.Headers["Location"]
+        $resp.Close()
+        if ([string]::IsNullOrWhiteSpace($location)) {
+            Write-Host "    [!] 响应无 Location header" -ForegroundColor DarkYellow
+            return $null
+        }
+        Write-Host "    [*] 收到重定向: $location" -ForegroundColor DarkCyan
+        # 解析 query string
+        $uri = [System.Uri]::new($location)
+        $query = $uri.Query.TrimStart('?')
+        if ([string]::IsNullOrWhiteSpace($query)) {
+            return $null
+        }
+        $result = @{}
+        foreach ($kv in $query.Split('&')) {
+            $parts = $kv.Split('=', 2)
+            if ($parts.Count -ne 2) { continue }
+            $k = [System.Uri]::UnescapeDataString($parts[0]).ToLower()
+            $v = [System.Uri]::UnescapeDataString($parts[1])
+            switch ($k) {
+                "wlanacname" { $result["wlan_ac_name"] = $v }
+                "wlanacip"   { $result["wlan_ac_ip"]   = $v }
+            }
+        }
+        if ($result.Count -eq 0) {
+            Write-Host "    [!] Location 中无 wlanacname / wlanacIp 参数" -ForegroundColor DarkYellow
+            return $null
+        }
+        return $result
+    } catch {
+        Write-Host "    [!] 自动探测异常: $($_.Exception.Message)" -ForegroundColor DarkYellow
         return $null
     }
 }
