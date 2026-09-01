@@ -1338,11 +1338,38 @@
             }[operator] || '';
             const userId = studentId + operatorSuffix;
 
+            // 在保存前自动调一次 parse_portal_url, 把 Portal URL 中能解析出的字段回填到表单
+            // (只有当用户没填这些字段时才回填, 不覆盖用户已填的值)
+            // 这样用户不需要手动点"解析"按钮也能正常工作
+            try {
+                const parsed = await invoke('parse_portal_url', { url: baseUrl });
+                const setIfEmpty = (id, val) => {
+                    if (!val) { return; }
+                    const el = document.getElementById(id);
+                    if (el && !el.value.trim()) { el.value = val; }
+                };
+                if (parsed.base_url) {
+                    document.getElementById('loginBaseUrl').value = parsed.base_url;
+                }
+                setIfEmpty('loginSsid', parsed.ssid);
+                setIfEmpty('loginWlanAcName', parsed.wlan_ac_name);
+                setIfEmpty('loginWlanAcIp', parsed.wlan_ac_ip);
+                setIfEmpty('loginVlan', parsed.vlan);
+                setIfEmpty('loginMacAddress', parsed.mac_address);
+                setIfEmpty('loginHostname', parsed.hostname);
+                addLog('已从 Portal URL 解析字段: ' +
+                    ['base_url', 'ssid', 'wlan_ac_name', 'wlan_ac_ip', 'vlan', 'mac_address', 'hostname']
+                        .filter(k => parsed[k]).map(k => k + '=' + parsed[k]).join(', '));
+            } catch (e) {
+                // 解析失败不阻塞保存, 字段空着也行 (PS 脚本里有自动探测兜底)
+                addLog('Portal URL 解析跳过: ' + e);
+            }
+
             const profile = {
                 user_id: userId,
                 operator: operator,
                 ssid: document.getElementById('loginSsid').value.trim(),
-                base_url: baseUrl,
+                base_url: document.getElementById('loginBaseUrl').value.trim(),
                 wlan_ac_name: document.getElementById('loginWlanAcName').value.trim(),
                 wlan_ac_ip: document.getElementById('loginWlanAcIp').value.trim(),
                 vlan: document.getElementById('loginVlan').value.trim(),
