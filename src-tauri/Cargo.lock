@@ -2830,7 +2830,7 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-crate"
-version = "2.0.3"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b00f26d3400549137f92511a46ac1cd8ce37cb5598a96d382381458b992a5d24"
 dependencies = [
@@ -5021,7 +5021,7 @@ dependencies = [
 
 [[package]]
 name = "webkit2gtk-sys"
-version = "2.0.3"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "916a5f65c2ef0dfe12fff695960a2ec3d4565359fdbb2e9943c974e06c734ea5"
 dependencies = [
