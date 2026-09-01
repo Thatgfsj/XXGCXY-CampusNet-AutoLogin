@@ -344,6 +344,15 @@ fn save_login_profile(profile: LoginProfile, password: String) -> Result<(), Str
     if profile.base_url.is_empty() {
         return Err("Portal URL 不能为空".to_string());
     }
+    // 硬校验: Portal URL 必须含 http(s):// 和 .do 路径
+    // 避免用户填了 `172.18.x.x:6060/portal.do` (无 scheme) 或纯 IP 进 profile
+    // 这些 URL 在 PS 脚本 Invoke-WebRequest 里依赖 WinHTTP 隐式推断, 不可靠
+    if !profile.base_url.contains("://") {
+        return Err("Portal URL 必须以 http:// 或 https:// 开头".to_string());
+    }
+    if !profile.base_url.to_lowercase().contains(".do") {
+        return Err("Portal URL 必须包含 .do 路径 (如 /portal.do 或 /quickauth.do)".to_string());
+    }
     if password.is_empty() {
         return Err("密码不能为空".to_string());
     }
