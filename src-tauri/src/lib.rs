@@ -514,23 +514,11 @@ async fn run_login_with_profile(app: AppHandle) -> Result<String, String> {
 
 // ============= DPAPI 密码加密 =============
 //
-// PS 端 ConvertFrom-SecureString 默认产出 UTF-16 LE 编码的 DPAPI 字节流,
-// 用 `ConvertTo-SecureString -String <blob> | ...` 可还原为 SecureString。
+// 链路:plaintext -> UTF-16 LE 字节 -> CryptProtectData (DPAPI, 无 entropy) -> 裸字节
+// PS 端读: [IO.File]::ReadAllBytes -> [Security.Cryptography.ProtectedData]::Unprotect($null, CurrentUser) -> UTF-16 LE 解码
 //
-// 为了让 PS 端能直接读我们写入的 .bin,我们用同样的字节布局:
-//   [0..4]   = "DPAPI" magic (4 bytes ASCII)
-//   [4..]    = CryptProtectData 输出
-//
-// PS 端读取后:
-//   $blob = [System.IO.File]::ReadAllBytes($credPath)
-//   $b64  = [Convert]::ToBase64String($blob)
-//   $sec  = ConvertTo-SecureString -String $b64 -Key $([Byte[]](1..16))
-//
-// (因为我们走的是 DPAPI 而不是 AES,PS 端不应该用 -Key;改成:
-//   $sec  = ConvertTo-SecureString -String $b64
-// )
-//
-// 我们的实现:CryptProtectData → 直接写裸字节 → PS 端用 ConvertTo-SecureString 读。
+// 注意: Rust 和 PS 必须都走"无 entropy"模式,否则解密失败
+// (旧版 v1.8.x 加过 8 字节 magic 头, v1.9.0+ 简化掉了, PS 端直接 ProtectedData::Unprotect)
 
 #[cfg(windows)]
 fn encrypt_password(plain: &str) -> Result<Vec<u8>, String> {
@@ -666,7 +654,9 @@ fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
                 .map_err(|e| format!("获取程序路径失败: {}", e))?
                 .to_string_lossy()
                 .to_string();
-            key.set_value("CampusWifiHelper", &exe_path)
+            // 路径含空格时必须加引号, 否则 Windows 解析注册表 Run 项时会按空格切断
+            let reg_value = format!("\"{}\"", exe_path);
+            key.set_value("CampusWifiHelper", &reg_value)
                 .map_err(|e| format!("写入注册表失败: {}", e))?;
         } else {
             let _ = key.delete_value("CampusWifiHelper");
@@ -692,6 +682,12 @@ fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
             );
             fs::write(&desktop_path, desktop_content)
                 .map_err(|e| format!("写入启动文件失败: {}", e))?;
+            // 文件包含 Exec 路径 (虽然不包含密码), 设 0600 防止其他用户读取安装路径
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&desktop_path, fs::Permissions::from_mode(0o600));
+            }
         } else {
             let _ = fs::remove_file(&desktop_path);
         }
