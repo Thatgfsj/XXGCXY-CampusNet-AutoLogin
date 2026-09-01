@@ -1183,15 +1183,18 @@
             // 回填已有配置
             try {
                 const profile = await invoke('get_login_profile');
-                if (profile && profile.user_id) {
-                    // 拆分学号/运营商
-                    const atIdx = profile.user_id.indexOf('@');
-                    if (atIdx > 0) {
-                        document.getElementById('loginStudentId').value = profile.user_id.substring(0, atIdx);
+                if (profile) {
+                    // user_id 拆分学号/运营商 (仅在 user_id 存在时做, 防止空 user_id 错误拆分)
+                    if (profile.user_id) {
+                        const atIdx = profile.user_id.indexOf('@');
+                        if (atIdx > 0) {
+                            document.getElementById('loginStudentId').value = profile.user_id.substring(0, atIdx);
+                        }
                     }
                     if (profile.operator) {
                         document.getElementById('loginOperator').value = profile.operator;
                     }
+                    // 其他字段独立回填, 不依赖 user_id 是否存在
                     document.getElementById('loginBaseUrl').value = profile.base_url || '';
                     document.getElementById('loginSsid').value = profile.ssid || '';
                     document.getElementById('loginWlanAcName').value = profile.wlan_ac_name || '';
@@ -1362,7 +1365,13 @@
                         .filter(k => parsed[k]).map(k => k + '=' + parsed[k]).join(', '));
             } catch (e) {
                 // 解析失败不阻塞保存, 字段空着也行 (PS 脚本里有自动探测兜底)
-                addLog('Portal URL 解析跳过: ' + e);
+                // 但要告诉用户原因, 让他知道可能要手动点"解析"或填写高级字段
+                const errStr = String(e);
+                if (errStr.includes('必须以 http://') || errStr.includes('.do')) {
+                    addLog('Portal URL 格式无效: ' + errStr + ' (请改成 http://host:port/portal.do 形式)');
+                } else {
+                    addLog('Portal URL 自动解析失败: ' + errStr + ' (PS 脚本会尝试自动探测, 如登录仍失败请手动点"解析"按钮)');
+                }
             }
 
             const profile = {
