@@ -599,10 +599,6 @@
         </div>
         <div class="advanced-content hidden" id="advancedContent">
             <div class="form-group">
-                <label class="form-label" for="loginSsid">WiFi 名称 (SSID)</label>
-                <input type="text" class="form-input" id="loginSsid" placeholder="例如 XXGC-Student">
-            </div>
-            <div class="form-group">
                 <label class="form-label" for="loginWlanAcName">AC 名称 (wlanacname)</label>
                 <input type="text" class="form-input" id="loginWlanAcName" placeholder="例如 XXGC-AC-01">
             </div>
@@ -1196,7 +1192,6 @@
                     }
                     // 其他字段独立回填, 不依赖 user_id 是否存在
                     document.getElementById('loginBaseUrl').value = profile.base_url || '';
-                    document.getElementById('loginSsid').value = profile.ssid || '';
                     document.getElementById('loginWlanAcName').value = profile.wlan_ac_name || '';
                     document.getElementById('loginWlanAcIp').value = profile.wlan_ac_ip || '';
                     document.getElementById('loginVlan').value = profile.vlan || '';
@@ -1268,7 +1263,6 @@
                     if (el && !el.value.trim()) { el.value = val; }
                 };
                 setIfEmpty('loginBaseUrl', parsed.base_url);
-                setIfEmpty('loginSsid', parsed.ssid);
                 setIfEmpty('loginWlanAcName', parsed.wlan_ac_name);
                 setIfEmpty('loginWlanAcIp', parsed.wlan_ac_ip);
                 setIfEmpty('loginVlan', parsed.vlan);
@@ -1346,14 +1340,13 @@
                 if (parsed.base_url) {
                     setIfEmpty('loginBaseUrl', parsed.base_url);
                 }
-                setIfEmpty('loginSsid', parsed.ssid);
                 setIfEmpty('loginWlanAcName', parsed.wlan_ac_name);
                 setIfEmpty('loginWlanAcIp', parsed.wlan_ac_ip);
                 setIfEmpty('loginVlan', parsed.vlan);
                 setIfEmpty('loginMacAddress', parsed.mac_address);
                 setIfEmpty('loginHostname', parsed.hostname);
                 addLog('已从 Portal URL 解析字段: ' +
-                    ['base_url', 'ssid', 'wlan_ac_name', 'wlan_ac_ip', 'vlan', 'mac_address', 'hostname']
+                    ['base_url', 'wlan_ac_name', 'wlan_ac_ip', 'vlan', 'mac_address', 'hostname']
                         .filter(k => parsed[k]).map(k => k + '=' + parsed[k]).join(', '));
             } catch (e) {
                 // 解析失败不阻塞保存, 字段空着也行 (PS 脚本里有自动探测兜底)
@@ -1369,7 +1362,7 @@
             const profile = {
                 user_id: userId,
                 operator: operator,
-                ssid: document.getElementById('loginSsid').value.trim(),
+                ssid: '',  // 删了 UI 字段, 这里保持空串兼容老 profile; PS 端 Get-CurrentSsid 兜底
                 base_url: document.getElementById('loginBaseUrl').value.trim(),
                 wlan_ac_name: document.getElementById('loginWlanAcName').value.trim(),
                 wlan_ac_ip: document.getElementById('loginWlanAcIp').value.trim(),
