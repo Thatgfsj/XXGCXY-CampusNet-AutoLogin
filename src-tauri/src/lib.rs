@@ -1260,16 +1260,32 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if output.status.success() {
             // 把脚本 stdout 一并返回, 方便 UI 日志看到发送层/响应细节
-            let detail = if stdout.trim().is_empty() {
+            // 按行 trim 保留换行, 不然 PS 端的多行输出会被压成一行
+            let trimmed: String = stdout
+                .lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim_start()
+                .to_string();
+            let detail = if trimmed.is_empty() {
                 "登录脚本执行成功".to_string()
             } else {
-                format!("登录脚本执行成功: {}", stdout.trim())
+                format!("登录脚本执行成功:\n{}", trimmed)
             };
             Ok(detail)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let combined = format!("{}{}", stderr, stdout);
-            Err(format!("登录脚本执行失败: {}", combined.trim()))
+            // 按行 trim_end 保留换行, 不然多行错误信息被压成一行
+            let trimmed: String = combined
+                .lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim_start()
+                .to_string();
+            Err(format!("登录脚本执行失败:\n{}", trimmed))
         }
     }
 
@@ -1285,16 +1301,32 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             .map_err(|e| format!("执行登录脚本失败: {}", e))?;
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if output.status.success() {
-            let detail = if stdout.trim().is_empty() {
+            // 按行 trim_end 保留换行
+            let trimmed: String = stdout
+                .lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim_start()
+                .to_string();
+            let detail = if trimmed.is_empty() {
                 "登录脚本执行成功".to_string()
             } else {
-                format!("登录脚本执行成功: {}", stdout.trim())
+                format!("登录脚本执行成功:\n{}", trimmed)
             };
             Ok(detail)
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
             let combined = format!("{}{}", stderr, stdout);
-            Err(format!("登录脚本执行失败: {}", combined.trim()))
+            // 按行 trim_end 保留换行
+            let trimmed: String = combined
+                .lines()
+                .map(|l| l.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim_start()
+                .to_string();
+            Err(format!("登录脚本执行失败:\n{}", trimmed))
         }
     }
 }
