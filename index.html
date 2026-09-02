@@ -1261,27 +1261,19 @@
             if (parseBtn) { parseBtn.disabled = true; }
             try {
                 const parsed = await invoke('parse_portal_url', { url });
-                if (parsed.base_url) {
-                    document.getElementById('loginBaseUrl').value = parsed.base_url;
-                }
-                if (parsed.ssid) {
-                    document.getElementById('loginSsid').value = parsed.ssid;
-                }
-                if (parsed.wlan_ac_name) {
-                    document.getElementById('loginWlanAcName').value = parsed.wlan_ac_name;
-                }
-                if (parsed.wlan_ac_ip) {
-                    document.getElementById('loginWlanAcIp').value = parsed.wlan_ac_ip;
-                }
-                if (parsed.vlan) {
-                    document.getElementById('loginVlan').value = parsed.vlan;
-                }
-                if (parsed.mac_address) {
-                    document.getElementById('loginMacAddress').value = parsed.mac_address;
-                }
-                if (parsed.hostname) {
-                    document.getElementById('loginHostname').value = parsed.hostname;
-                }
+                // 跟 saveLoginProfile 一致, 只在表单空时回填, 不覆盖用户已填的值
+                const setIfEmpty = (id, val) => {
+                    if (!val) { return; }
+                    const el = document.getElementById(id);
+                    if (el && !el.value.trim()) { el.value = val; }
+                };
+                setIfEmpty('loginBaseUrl', parsed.base_url);
+                setIfEmpty('loginSsid', parsed.ssid);
+                setIfEmpty('loginWlanAcName', parsed.wlan_ac_name);
+                setIfEmpty('loginWlanAcIp', parsed.wlan_ac_ip);
+                setIfEmpty('loginVlan', parsed.vlan);
+                setIfEmpty('loginMacAddress', parsed.mac_address);
+                setIfEmpty('loginHostname', parsed.hostname);
 
                 // 展开高级字段让用户看到结果
                 const content = document.getElementById('advancedContent');
@@ -1352,7 +1344,7 @@
                     if (el && !el.value.trim()) { el.value = val; }
                 };
                 if (parsed.base_url) {
-                    document.getElementById('loginBaseUrl').value = parsed.base_url;
+                    setIfEmpty('loginBaseUrl', parsed.base_url);
                 }
                 setIfEmpty('loginSsid', parsed.ssid);
                 setIfEmpty('loginWlanAcName', parsed.wlan_ac_name);
