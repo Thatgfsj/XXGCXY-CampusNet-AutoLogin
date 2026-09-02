@@ -442,16 +442,20 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
     // 提取 BaseURL: 形如 "http://host:port/portal.do"
     let base_url = {
         // 简单正则: ^http://[^/]+/\w+\.do
+        // 注意: 这里要保留 scheme (http:// 或 https://), 不然前端会拿到无 scheme 的 host:port/portal.do
         let lower = decoded.to_lowercase();
         if let Some(idx) = lower.find("://") {
-            let after_scheme = &decoded[idx + 3..];
+            // idx 指向 ':' 位置, :// 是 3 字符, scheme 总长度 = idx + 3
+            let scheme_end = idx + 3;
+            let after_scheme = &decoded[scheme_end..];
             // 找到第一个 /,然后到 .do 结尾
             if let Some(slash_idx) = after_scheme.find('/') {
                 let host_and_path = &after_scheme[slash_idx..];
                 // 找 ".do" 结尾
                 if let Some(do_idx) = host_and_path.to_lowercase().find(".do") {
                     let end = do_idx + 3;
-                    after_scheme[..slash_idx + end].to_string()
+                    // 用 decoded[..scheme_end + slash_idx + end] 而不是 after_scheme[..] 来保留 scheme
+                    decoded[..scheme_end + slash_idx + end].to_string()
                 } else {
                     return Err("URL 中找不到 portal.do 路径".to_string());
                 }
