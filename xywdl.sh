@@ -114,35 +114,18 @@ log_info "========================================"
 log_info "  校园网自动登录脚本 (Linux版, v1.9.0+)"
 log_info "========================================"
 log_info ""
-log_info "[*] 步骤 0: 加载登录配置..."
-log_info "    学号: $USER_ID"
-log_info "    运营商: $OPERATOR"
-log_info "    Portal URL: $BASE_URL"
-log_info "    VLAN: $VLAN"
-log_info "    SSID: $SSID"
-log_info "    AC 名称: $WLAN_AC_NAME"
-log_info "    AC IP: $WLAN_AC_IP"
+log_info "[*] 步骤 0: 加载配置..."
+log_info "    学号=$USER_ID 运营商=$OPERATOR VLAN=$VLAN AC=$WLAN_AC_NAME IP=$WLAN_AC_IP"
 
-log_info "[*] 步骤 0 完成 - 配置验证通过"
-log_info ""
-
-log_info "[*] 步骤 0.5: 读取密码..."
+log_info "[*] 步骤 0.5: 读密码..."
 if [[ -z "$PASSWORD" ]]; then
-    log_error "[!] 卡在: 步骤 0.5 - 密码文件为空"
+    log_error "[!] 密码文件为空"
     exit 3
 fi
-log_info "[*] 步骤 0.5 完成 - 密码读取成功 (已隐藏)"
-log_info ""
 
-log_info "[*] 步骤 1: 获取运行时网络信息..."
-log_info "    当前 SSID: $SSID"
+log_info "[*] 步骤 1: 网络信息..."
 if [[ -z "$WLAN_USER_IP" ]]; then
     WLAN_USER_IP=$(ip route get 1 2>/dev/null | grep -oP 'src \K[^ ]+' | head -1)
-fi
-if [[ -z "$WLAN_USER_IP" ]]; then
-    log_warn "[*] 拿不到本机 IP, wlanuserip 留空"
-else
-    log_info "    本机 IP: $WLAN_USER_IP"
 fi
 
 LIVE_MAC=""
@@ -157,9 +140,7 @@ if [[ -n "$LIVE_MAC" ]]; then
 else
     MAC=$(echo "$PROFILE_MAC" | tr '[:upper:]' '[:lower:]')
 fi
-log_info "    本机 MAC: $MAC"
-log_info "[*] 步骤 1 完成"
-log_info ""
+log_info "    IP=$WLAN_USER_IP MAC=$MAC SSID=$SSID"
 
 # 构造 quickauth.do URL
 log_info "[*] 步骤 2: 构造认证请求 URL..."
@@ -197,17 +178,15 @@ print(urllib.parse.urlencode(params))
 ")
 
 REQUEST_URL="${AUTH_URL}?${QUERY}"
-log_info "[*] 步骤 2 完成"
-log_info ""
 
 # 发送 (两层降级: curl → python3 sender.py)
 # 完整 URL 通过 stdin 传给 sender, 避免明文密码出现在进程命令行
-log_info "[*] 步骤 3: 发送认证请求 (两层降级)..."
+log_info "[*] 步骤 3: 发送..."
 RESPONSE=""
 
 # 第 1 层: curl (默认主力, 带 noproxy 避免系统代理干扰)
 if curl --version >/dev/null 2>&1; then
-    log_info "    [第 1 层] curl..."
+    log_info "    [L1] curl..."
     HTTP_CODE=$(curl -s -o /tmp/xywdl_response.txt -w "%{http_code}" \
         --max-redirs 0 --noproxy '*' --max-time 30 \
         "$REQUEST_URL" 2>/dev/null || echo "000")
@@ -215,40 +194,38 @@ if curl --version >/dev/null 2>&1; then
     if [[ "$HTTP_CODE" != "000" ]]; then
         RESPONSE=$(cat /tmp/xywdl_response.txt 2>/dev/null || echo "")
         rm -f /tmp/xywdl_response.txt
-        log_info "    [第 1 层] 成功, HTTP 状态码: $HTTP_CODE"
+        log_info "    [L1] 成功 (HTTP $HTTP_CODE)"
     else
-        log_warn "    [第 1 层] curl 发送失败 (HTTP_CODE=000), 降级到 python3..."
+        log_warn "    [L1] 失败,降级到 L2"
     fi
 else
-    log_warn "    未找到 curl, 直接使用 python3..."
+    log_warn "    未找到 curl,直接用 L2"
 fi
 
 # 第 2 层: python3 sender.py (纯标准库, 跨平台最强保底)
 if [[ -z "$RESPONSE" ]]; then
-    log_info "    [第 2 层] python3 sender.py..."
+    log_info "    [L2] python3..."
     PY_SENDER="$SCRIPT_DIR/src/sender/sender.py"
     if [[ ! -f "$PY_SENDER" ]]; then
         PY_SENDER="$SCRIPT_DIR/sender.py"
     fi
     if command -v python3 >/dev/null 2>&1 && [[ -f "$PY_SENDER" ]]; then
         if RESPONSE=$(printf '%s' "$REQUEST_URL" | python3 "$PY_SENDER" 2>/tmp/xywdl_py_err.txt); then
-            log_info "    [第 2 层] 成功"
+            log_info "    [L2] 成功"
             rm -f /tmp/xywdl_py_err.txt
         else
             PY_ERR=$(cat /tmp/xywdl_py_err.txt 2>/dev/null)
             rm -f /tmp/xywdl_py_err.txt
-            log_error "[!] 卡在: 步骤 3 - python3 sender.py 失败: $PY_ERR"
+            log_error "[!] python3 失败: $PY_ERR"
             exit 99
         fi
     else
-        log_error "[!] 卡在: 步骤 3 - 所有发送层均失败 (无 curl 且无 python3/sender.py)"
+        log_error "[!] 所有发送层均失败"
         exit 99
     fi
 fi
-log_info "[*] 步骤 3 完成"
-log_info ""
 
-log_info "[*] 步骤 4: 判定认证结果..."
+log_info "[*] 步骤 4: 判定..."
 log_info "    响应: $RESPONSE"
 
 # 判定结果 (跟 PS 端一致)
