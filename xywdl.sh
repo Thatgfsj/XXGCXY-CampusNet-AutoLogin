@@ -16,6 +16,24 @@ PROFILE_DIR="$HOME/.config/xxgcxy-wifi"
 PROFILE_FILE="$PROFILE_DIR/login_profile.json"
 CRED_FILE="$PROFILE_DIR/login_credential.bin"
 
+# ============= 日志文件 (今天写, 昨天留, 前天删) =============
+# 路径: $HOME/.config/xxgcxy-wifi/logs/xywdl-YYYY-MM-DD.log
+LOGS_DIR="$PROFILE_DIR/logs"
+mkdir -p "$LOGS_DIR"
+TODAY=$(date +%Y-%m-%d)
+YESTERDAY=$(date -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d)
+# 清理前天及更早的日志 (保留今天 + 昨天)
+find "$LOGS_DIR" -maxdepth 1 -name "xywdl-*.log" -type f 2>/dev/null | while read -r f; do
+    name=$(basename "$f" .log)  # xywdl-2026-09-01
+    date_str="${name#xywdl-}"
+    if [ "$date_str" != "$TODAY" ] && [ "$date_str" != "$YESTERDAY" ]; then
+        rm -f "$f"
+    fi
+done
+LOG_FILE="$LOGS_DIR/xywdl-$TODAY.log"
+# 把所有 stdout 写到当天日志 (同时 Rust 收 stdout 显示给用户)
+exec >> >(tee -a "$LOG_FILE") 2>&1
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
