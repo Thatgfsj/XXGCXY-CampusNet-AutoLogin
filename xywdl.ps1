@@ -696,28 +696,43 @@ function Invoke-CampusLogin {
         return 99
     }
 
-    # 提取响应摘要 (不打印整个 JSON, 太长且重复)
+    # 提取响应摘要 (code + message)
     # 找 "code":"X" 和 "message":"..."
     $respCode = ""
     $respMsg = ""
     if ($body -match '"code"\s*:\s*"([^"]*)"') { $respCode = $Matches[1] }
     if ($body -match '"message"\s*:\s*"([^"]*)"') { $respMsg = $Matches[1] }
-    Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
-    Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
-    Write-Host ""
 
     # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
     # "code":1 (账号不存在), "code":440 会被误判成 "code":44 (非法接入)。
     if ($body -match '"code"\s*:\s*0(?!\d)' -or $body -match "success" -or $body -match "认证成功") {
+        # 成功: 只打印摘要
+        Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
+        Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
+        Write-Host ""
         Write-Host "[+] 认证成功" -ForegroundColor Green
         return 0
     } elseif ($body -match '"code"\s*:\s*1(?!\d)' -or $body -match "账号不存在") {
+        # 失败: 打印摘要 + 完整 body (方便排查)
+        Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
+        Write-Host "    完整响应: $body" -ForegroundColor DarkGray
+        Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
+        Write-Host ""
         Write-Host "[!] 认证失败:账号不存在" -ForegroundColor Red
         return 1
     } elseif ($body -match '"code"\s*:\s*44(?!\d)' -or $body -match "非法接入") {
+        Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
+        Write-Host "    完整响应: $body" -ForegroundColor DarkGray
+        Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
+        Write-Host ""
         Write-Host "[!] 认证失败:非法接入" -ForegroundColor Red
         return 44
     } else {
+        # 未知: 打印完整 body
+        Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
+        Write-Host "    完整响应: $body" -ForegroundColor DarkGray
+        Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
+        Write-Host ""
         Write-Host "[!] 认证结果未知" -ForegroundColor Yellow
         return 99
     }
