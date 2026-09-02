@@ -604,7 +604,7 @@
             </div>
             <div class="form-group">
                 <label class="form-label" for="loginWlanAcIp">AC IP (wlanacIp)</label>
-                <input type="text" class="form-input" id="loginWlanAcIp" placeholder="例如 172.18.252.12">
+                <input type="text" class="form-input" id="loginWlanAcIp" placeholder="例如 172.***.***.***">
             </div>
             <div class="form-group">
                 <label class="form-label" for="loginVlan">VLAN ID</label>
@@ -1570,30 +1570,36 @@
         // 添加日志
         // 用 textContent 不用 innerHTML 避免 XSS (PS 输出含 < > & 字符时不会被解析)
         function addLog(message) {
-            const logBox = document.getElementById('logBox');
-            const now = new Date();
-            const time = now.toTimeString().split(' ')[0];
+            // 多行 message 按 \n 拆成多条, 否则 <span> 不换行
+            const lines = String(message).split('\n');
+            lines.forEach(line => {
+                const logBox = document.getElementById('logBox');
+                const now = new Date();
+                const time = now.toTimeString().split(' ')[0];
 
-            const entry = document.createElement('div');
-            entry.className = 'log-entry';
+                const entry = document.createElement('div');
+                entry.className = 'log-entry';
 
-            const timeSpan = document.createElement('span');
-            timeSpan.className = 'log-time';
-            timeSpan.textContent = `[${time}]`;
+                const timeSpan = document.createElement('span');
+                timeSpan.className = 'log-time';
+                timeSpan.textContent = `[${time}]`;
 
-            const msgSpan = document.createElement('span');
-            msgSpan.textContent = ' ' + message;
+                const msgSpan = document.createElement('span');
+                msgSpan.textContent = ' ' + line;
 
-            entry.appendChild(timeSpan);
-            entry.appendChild(msgSpan);
+                entry.appendChild(timeSpan);
+                entry.appendChild(msgSpan);
 
-            logBox.appendChild(entry);
-            logBox.scrollTop = logBox.scrollHeight;
+                logBox.appendChild(entry);
+                logBox.scrollTop = logBox.scrollHeight;
+            });
 
             // 保留最近50条日志
+            const logBox = document.getElementById('logBox');
             while (logBox.children.length > 50) {
                 logBox.removeChild(logBox.firstChild);
             }
+        }
         }
         
         // 睡眠函数
