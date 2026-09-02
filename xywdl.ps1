@@ -696,8 +696,13 @@ function Invoke-CampusLogin {
         return 99
     }
 
-    Write-Host "    发送层: $sendSource" -ForegroundColor Cyan
-    Write-Host "    响应: $body" -ForegroundColor White
+    # 提取响应摘要 (不打印整个 JSON, 太长且重复)
+    # 找 "code":"X" 和 "message":"..."
+    $respCode = ""
+    $respMsg = ""
+    if ($body -match '"code"\s*:\s*"([^"]*)"') { $respCode = $Matches[1] }
+    if ($body -match '"message"\s*:\s*"([^"]*)"') { $respMsg = $Matches[1] }
+    Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
     Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
     Write-Host ""
 
@@ -714,7 +719,6 @@ function Invoke-CampusLogin {
         return 44
     } else {
         Write-Host "[!] 认证结果未知" -ForegroundColor Yellow
-        Write-Host "    响应: $body" -ForegroundColor Yellow
         return 99
     }
 }
