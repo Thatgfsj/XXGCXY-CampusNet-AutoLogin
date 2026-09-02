@@ -50,6 +50,25 @@ $AppDataDir = Join-Path $env:APPDATA "xxgcxy-wifi"
 $ProfilePath = Join-Path $AppDataDir "login_profile.json"
 $CredPath = Join-Path $AppDataDir "login_credential.bin"
 
+# ============= 日志文件 (今天写, 昨天留, 前天删) =============
+# 路径: %APPDATA%\xxgcxy-wifi\logs\xywdl-YYYY-MM-DD.log
+# 启动时清理 > 1 天的日志 (即只保留今天 + 昨天)
+$LogsDir = Join-Path $AppDataDir "logs"
+if (-not (Test-Path $LogsDir)) {
+    New-Item -ItemType Directory -Path $LogsDir -Force | Out-Null
+}
+$today = Get-Date -Format "yyyy-MM-dd"
+$yesterday = (Get-Date).AddDays(-1).ToString("yyyy-MM-dd")
+Get-ChildItem -Path $LogsDir -Filter "xywdl-*.log" -ErrorAction SilentlyContinue | ForEach-Object {
+    $dateStr = $_.BaseName -replace '^xywdl-', ''
+    if ($dateStr -ne $today -and $dateStr -ne $yesterday) {
+        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+# 用 Start-Transcript 把所有 Write-Host 输出同时写到当天日志
+$LogFile = Join-Path $LogsDir "xywdl-$today.log"
+Start-Transcript -Path $LogFile -Append -NoClobber -ErrorAction SilentlyContinue | Out-Null
+
 # ============= 工具函数 =============
 
 function Get-LoginDir {
