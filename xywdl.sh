@@ -234,10 +234,9 @@ if [[ -z "$RESPONSE" ]]; then
 fi
 
 log_info "[*] 步骤 4: 判定..."
-# 提取 code/message 摘要 (不打印整个 JSON, 太长且重复)
+# 提取 code/message 摘要
 RESP_CODE=$(echo "$RESPONSE" | grep -oE '"code"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
 RESP_MSG=$(echo "$RESPONSE" | grep -oE '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-log_info "    code=$RESP_CODE  msg=$RESP_MSG"
 
 # 判定结果 (跟 PS 端一致)
 # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
@@ -246,17 +245,27 @@ log_info "    code=$RESP_CODE  msg=$RESP_MSG"
 if echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*0([^0-9]|$)' \
    || echo "$RESPONSE" | grep -q "success" \
    || echo "$RESPONSE" | grep -q "认证成功"; then
+    # 成功: 只打印摘要
+    log_info "    code=$RESP_CODE  msg=$RESP_MSG"
     log_success "[+] 认证成功"
     exit 0
 elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*1([^0-9]|$)' \
      || echo "$RESPONSE" | grep -q "账号不存在"; then
+    # 失败: 打印摘要 + 完整响应
+    log_info "    code=$RESP_CODE  msg=$RESP_MSG"
+    log_info "    完整响应: $RESPONSE"
     log_error "[!] 认证失败:账号不存在"
     exit 1
 elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*44([^0-9]|$)' \
      || echo "$RESPONSE" | grep -q "非法接入"; then
+    log_info "    code=$RESP_CODE  msg=$RESP_MSG"
+    log_info "    完整响应: $RESPONSE"
     log_error "[!] 认证失败:非法接入 (VLAN/MAC 不匹配)"
     exit 44
 else
+    # 未知: 打印完整响应
+    log_info "    code=$RESP_CODE  msg=$RESP_MSG"
+    log_info "    完整响应: $RESPONSE"
     log_warn "[!] 认证结果未知"
     exit 99
 fi
