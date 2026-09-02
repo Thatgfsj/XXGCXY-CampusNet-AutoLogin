@@ -1026,8 +1026,8 @@
             } catch (e) {
                 addLog('登录失败: ' + e);
                 isLoggingIn = false;  // 失败时立即重置，允许重试
-                // 登录失败后等待5秒重试一次
-                addLog('将在5秒后重试登录...');
+                // 登录失败后等待30秒重试 (校园网 AC 限频保护, 太频繁会被服务器拒)
+                addLog('将在30秒后重试登录...');
                 setTimeout(async () => {
                     isLoggingIn = false;
                     if (autoCheckEnabled) {
@@ -1047,13 +1047,13 @@
                             addLog('重试登录失败: ' + e2);
                         }
                     }
-                }, 5000);
+                }, 30000);
             } finally {
                 // 只有登录成功时才延迟重置，防止短时间内重复登录
                 if (isLoggingIn) {
                     setTimeout(() => {
                         isLoggingIn = false;
-                    }, 5000);
+                    }, 30000);
                 }
             }
         }
