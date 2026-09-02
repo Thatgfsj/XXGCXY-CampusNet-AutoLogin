@@ -47,12 +47,6 @@ log_success() { echo -e "${GREEN}$1${NC}"; }
 log_warn() { echo -e "${YELLOW}$1${NC}"; }
 log_error() { echo -e "${RED}$1${NC}"; }
 
-echo -e "${CYAN}"
-echo "========================================"
-echo "  新乡工程学院校园网登录脚本 (Linux版, v1.9.0+)"
-echo "========================================"
-echo -e "${NC}"
-
 # 检查 profile 文件
 if [[ ! -f "$PROFILE_FILE" ]]; then
     log_error "[!] 未找到登录配置: $PROFILE_FILE"
@@ -128,10 +122,6 @@ if [[ -z "$WLAN_AC_NAME" || -z "$WLAN_AC_IP" ]]; then
 fi
 
 echo ""
-log_info "========================================"
-log_info "  校园网自动登录脚本 (Linux版, v1.9.0+)"
-log_info "========================================"
-log_info ""
 log_info "[*] 步骤 0: 加载配置..."
 log_info "    学号=$USER_ID 运营商=$OPERATOR VLAN=$VLAN AC=$WLAN_AC_NAME IP=$WLAN_AC_IP"
 
@@ -244,7 +234,10 @@ if [[ -z "$RESPONSE" ]]; then
 fi
 
 log_info "[*] 步骤 4: 判定..."
-log_info "    响应: $RESPONSE"
+# 提取 code/message 摘要 (不打印整个 JSON, 太长且重复)
+RESP_CODE=$(echo "$RESPONSE" | grep -oE '"code"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+RESP_MSG=$(echo "$RESPONSE" | grep -oE '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+log_info "    code=$RESP_CODE  msg=$RESP_MSG"
 
 # 判定结果 (跟 PS 端一致)
 # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
@@ -253,17 +246,17 @@ log_info "    响应: $RESPONSE"
 if echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*0([^0-9]|$)' \
    || echo "$RESPONSE" | grep -q "success" \
    || echo "$RESPONSE" | grep -q "认证成功"; then
-    log_success "[+] 认证成功,已连接到互联网"
+    log_success "[+] 认证成功"
     exit 0
 elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*1([^0-9]|$)' \
      || echo "$RESPONSE" | grep -q "账号不存在"; then
-    log_error "[!] 卡在: 步骤 4 - 认证失败:账号不存在"
+    log_error "[!] 认证失败:账号不存在"
     exit 1
 elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*44([^0-9]|$)' \
      || echo "$RESPONSE" | grep -q "非法接入"; then
-    log_error "[!] 卡在: 步骤 4 - 认证失败:非法接入 (VLAN/MAC 不匹配)"
+    log_error "[!] 认证失败:非法接入 (VLAN/MAC 不匹配)"
     exit 44
 else
-    log_warn "[!] 卡在: 步骤 4 - 认证结果未知"
+    log_warn "[!] 认证结果未知"
     exit 99
 fi
