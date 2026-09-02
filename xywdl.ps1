@@ -146,7 +146,9 @@ function Load-LoginProfile {
         }
         # 软必填: wlan_ac_name / wlan_ac_ip 缺失时, 尝试从 base_url 触发 portal.do 重定向,
         # 从 Location header 的 ?wlanacname=...&wlanacIp=... 提取并回填。
-        # 提取不到再降级为空串 (服务器可能拒, 但流程能跑下去, 用户能看到真实错误而非卡在配置加载)
+        # 提取不到时:
+        #   - wlan_ac_ip: 用 base_url 的 host 兜底 (校园网 AC 通常就是 portal host)
+        #   - wlan_ac_name: 留空 (服务器可能拒, 但流程能跑下去)
         $softRequired = @("wlan_ac_name", "wlan_ac_ip")
         $missingSoft = @()
         foreach ($f in $softRequired) {
@@ -164,12 +166,31 @@ function Load-LoginProfile {
                         Write-Host "    [✓] 自动填入 $f = $($autoFilled[$f])" -ForegroundColor Green
                     }
                 }
-            } else {
-                foreach ($f in $missingSoft) {
-                    if (-not ($json.PSObject.Properties.Name -contains $f) -or [string]::IsNullOrWhiteSpace($json.$f)) {
-                        $json | Add-Member -NotePropertyName $f -NotePropertyValue "" -Force
-                        Write-Host "    [!] 自动探测失败, $f 留空 (可能登录会被服务器拒绝)" -ForegroundColor DarkYellow
+            }
+            # 兜底: wlan_ac_ip 如果还是空, 用 base_url 的 host 代替
+            if ($missingSoft -contains "wlan_ac_ip") {
+                if (-not ($fieldNames -contains "wlan_ac_ip") -or [string]::IsNullOrWhiteSpace($json.wlan_ac_ip)) {
+                    $hostFallback = $null
+                    try {
+                        $tmpUri = [System.Uri]::new($json.base_url)
+                        $hostFallback = $tmpUri.Host
+                    } catch {}
+                    if ($hostFallback) {
+                        $json.wlan_ac_ip = $hostFallback
+                        Write-Host "    [~] 兜底: wlan_ac_ip = base_url host ($hostFallback)" -ForegroundColor Cyan
+                    } else {
+                        if (-not ($json.PSObject.Properties.Name -contains "wlan_ac_ip")) {
+                            $json | Add-Member -NotePropertyName "wlan_ac_ip" -NotePropertyValue "" -Force
+                        }
+                        Write-Host "    [!] wlan_ac_ip 留空 (可能登录会被服务器拒绝)" -ForegroundColor DarkYellow
                     }
+                }
+            }
+            # wlan_ac_name 兜底: 留空
+            if ($missingSoft -contains "wlan_ac_name") {
+                if (-not ($json.PSObject.Properties.Name -contains "wlan_ac_name") -or [string]::IsNullOrWhiteSpace($json.wlan_ac_name)) {
+                    $json | Add-Member -NotePropertyName "wlan_ac_name" -NotePropertyValue "" -Force
+                    Write-Host "    [!] wlan_ac_name 留空 (可能登录会被服务器拒绝)" -ForegroundColor DarkYellow
                 }
             }
         }
@@ -560,10 +581,10 @@ function Invoke-CampusLogin {
             $statusCode = " (HTTP $($_.Exception.Response.StatusCode))"
         }
         $sendErrors += "PowerShell: $errMsg$statusCode"
-        Write-Host "      [第 1 层] 失败: $errMsg$statusCode" -ForegroundColor Red
+        Write-Host "    [L1] 失败: $errMsg$statusCode" -ForegroundColor Red
     } catch {
         $sendErrors += "PowerShell: $($_.Exception.Message)"
-        Write-Host "      [第 1 层] 失败: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "    [L1] 失败: $($_.Exception.Message)" -ForegroundColor Red
     }
 
     # 4.2 第 2 层: C# sender (xywdl_sender.exe, .NET Framework 4.x, Win7+ 自带运行时)
@@ -593,11 +614,11 @@ function Invoke-CampusLogin {
                 }
             } catch {
                 $sendErrors += "C#: $($_.Exception.Message)"
-                Write-Host "      [第 2 层] 异常: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "    [L2] 异常: $($_.Exception.Message)" -ForegroundColor Red
             }
         } else {
             $sendErrors += "C#: 未找到 xywdl_sender.exe (检查 src/sender/ 目录)"
-            Write-Host "      [第 2 层] 未找到 xywdl_sender.exe" -ForegroundColor Yellow
+            Write-Host "    [L2] 未找到 xywdl_sender.exe" -ForegroundColor Yellow
         }
     }
 
@@ -623,7 +644,7 @@ function Invoke-CampusLogin {
         foreach ($c in $pyCandidates) {
             $cmd = Get-Command $c.Name -ErrorAction SilentlyContinue
             if (-not $cmd) {
-                Write-Host "      Python 候选 '$($c.Name)': 未找到" -ForegroundColor DarkGray
+                Write-Host "    Python 候选 '$($c.Name)': 未找到" -ForegroundColor DarkGray
                 continue
             }
             try {
@@ -631,19 +652,19 @@ function Invoke-CampusLogin {
                 if ($LASTEXITCODE -eq 0 -and ($probe -join '') -match 'PYOK') {
                     $py = $cmd.Source
                     $pyArgs = @($c.Args)
-                    Write-Host "      使用 Python: $($py.Name) (参数: $($pyArgs -join ' '))" -ForegroundColor Gray
+                    Write-Host "    使用 Python: $($py.Name) (参数: $($pyArgs -join ' '))" -ForegroundColor Gray
                     break
                 }
-                Write-Host "      Python 候选 '$($c.Name)': 探测失败 (exit=$LASTEXITCODE)" -ForegroundColor DarkGray
+                Write-Host "    Python 候选 '$($c.Name)': 探测失败 (exit=$LASTEXITCODE)" -ForegroundColor DarkGray
                 $sendErrors += "Python: $($c.Name) 不可用 (exit=$LASTEXITCODE)"
             } catch {
-                Write-Host "      Python 候选 '$($c.Name)': 启动失败" -ForegroundColor DarkGray
+                Write-Host "    Python 候选 '$($c.Name)': 启动失败" -ForegroundColor DarkGray
                 $sendErrors += "Python: $($c.Name) 启动失败: $($_.Exception.Message)"
             }
         }
         if ($pyScript -and $py) {
             try {
-                Write-Host "      发送请求: $maskedUrl" -ForegroundColor DarkGray
+                Write-Host "    发送请求: $maskedUrl" -ForegroundColor DarkGray
                 $rawOut = $requestUrl | & $py @pyArgs $pyScript 2>&1
                 $exitCode = $LASTEXITCODE
                 if ($exitCode -eq 0) {
@@ -657,11 +678,11 @@ function Invoke-CampusLogin {
                 }
             } catch {
                 $sendErrors += "Python: $($_.Exception.Message)"
-                Write-Host "      [第 3 层] 异常: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "    [L3] 异常: $($_.Exception.Message)" -ForegroundColor Red
             }
         } else {
             $sendErrors += "Python: 未找到可用的 python 解释器或 sender.py"
-            Write-Host "      [第 3 层] 未找到可用的 python 解释器或 sender.py" -ForegroundColor Yellow
+            Write-Host "    [L3] 未找到可用的 python 解释器或 sender.py" -ForegroundColor Yellow
         }
     }
     Write-Host "[步骤 4/5] 完成" -ForegroundColor Green
@@ -712,14 +733,8 @@ try {
         Write-Host "    可能原因: 配置缺失、密码文件不存在、JSON 格式错误" -ForegroundColor Yellow
         exit 2
     }
-    Write-Host "[*] 配置加载成功" -ForegroundColor Green
-    Write-Host "    学号: $($profile.user_id)" -ForegroundColor Gray
-    Write-Host "    运营商: $(Get-OperatorName $profile.operator)" -ForegroundColor Gray
-    Write-Host "    Portal URL: $($profile.base_url)" -ForegroundColor Gray
-    Write-Host "    VLAN: $($profile.vlan)" -ForegroundColor Gray
-    Write-Host "    SSID: $($profile.ssid)" -ForegroundColor Gray
-    Write-Host "    AC 名称: $($profile.wlan_ac_name)" -ForegroundColor Gray
-    Write-Host "    AC IP: $($profile.wlan_ac_ip)" -ForegroundColor Gray
+    # 步骤 0 内部已经打印过配置, 这里只打一行 summary
+    Write-Host "[*] 配置 OK: 学号=$($profile.user_id) VLAN=$($profile.vlan) AC=$($profile.wlan_ac_name) IP=$($profile.wlan_ac_ip)" -ForegroundColor Green
     Write-Host ""
 
     Write-Host "[*] 步骤 0.5: 解密密码..." -ForegroundColor Yellow
@@ -729,20 +744,17 @@ try {
         Write-Host "    可能原因: credential 文件损坏、DPAPI 加密钥匙不匹配" -ForegroundColor Yellow
         exit 3
     }
-    Write-Host "[*] 密码解密成功 (已隐藏)" -ForegroundColor Green
+    Write-Host "[*] 密码解密 OK" -ForegroundColor Green
     Write-Host ""
 
-    Write-Host "[*] 步骤 1: 执行校园网认证..." -ForegroundColor Yellow
     $code = Invoke-CampusLogin -profile $profile -password $password
     Write-Host ""
     if ($code -eq 0) {
         Write-Host "[+] 登录成功!" -ForegroundColor Green
     } elseif ($code -eq 1) {
         Write-Host "[!] 登录失败: 账号不存在" -ForegroundColor Red
-        Write-Host "[!] 卡在: 认证失败 - 账号不存在" -ForegroundColor Red
     } elseif ($code -eq 44) {
-        Write-Host "[!] 登录失败: 非法接入" -ForegroundColor Red
-        Write-Host "[!] 卡在: 认证失败 - 非法接入 (VLAN/MAC 不匹配)" -ForegroundColor Red
+        Write-Host "[!] 登录失败: 非法接入 (VLAN/MAC 不匹配)" -ForegroundColor Red
     } elseif ($code -eq 99) {
         Write-Host "[!] 登录失败: 未知错误" -ForegroundColor Red
     } else {
