@@ -131,7 +131,7 @@ pub struct LoginProfile {
     pub user_id: String,        // 形如 "2021110101@xxgcyd"
     pub operator: String,       // "yd" | "lt" | "dx"
     pub ssid: String,
-    pub base_url: String,       // 完整 portal.do URL,如 http://172.18.252.12:6060/portal.do
+    pub base_url: String,       // 完整 portal.do URL, 如 http://172.16.x.x:6060/portal.do
     pub wlan_ac_name: String,
     pub wlan_ac_ip: String,
     pub vlan: String,

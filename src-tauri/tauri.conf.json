@@ -14,8 +14,10 @@
       {
         "title": "校园网自动登录助手",
         "label": "main",
-        "width": 500,
-        "height": 750,
+        "width": 460,
+        "height": 800,
+        "minWidth": 460,
+        "minHeight": 760,
         "resizable": true,
         "fullscreen": false,
         "center": true,

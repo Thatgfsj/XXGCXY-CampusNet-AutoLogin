@@ -82,13 +82,14 @@
             position: relative;
             z-index: 1;
             width: 100%;
-            max-width: 490px;
+            max-width: 460px;
+            box-sizing: border-box;
             min-height: 100vh;
-            padding: 24px 20px 30px;
+            padding: 20px 16px 28px;
             display: flex;
             flex-direction: column;
-            gap: 16px;
-            animation: fadeIn .3s ease-out;
+            gap: 14px;
+            animation: fadeIn .25s ease-out;
         }
         .container.hidden { display: none !important; }
 
@@ -1031,7 +1032,7 @@
             <div class="form-group">
                 <label class="form-label" for="loginStudentId">学生学号</label>
                 <input type="text" class="form-input" id="loginStudentId"
-                       placeholder="例如 2021110101" maxlength="20"
+                       placeholder="例如 2024010101" maxlength="20"
                        oninput="this.value = this.value.replace(/[^\d]/g, '')">
                 <div class="form-hint">纯数字，系统认证时自动拼接对应运营商后缀</div>
             </div>
@@ -1047,7 +1048,7 @@
                 <label class="form-label" for="loginBaseUrl">Portal 认证地址 <span style="color:var(--text-muted); font-weight:normal;">(必填)</span></label>
                 <div class="form-row">
                     <input type="text" class="form-input" id="loginBaseUrl"
-                           placeholder="http://172.18.252.12:6060/portal.do"
+                           placeholder="http://172.16.x.x:6060/portal.do"
                            onpaste="setTimeout(parsePortalUrl, 100)">
                     <button type="button" class="btn-parse" onclick="parsePortalUrl()">自动提纯</button>
                 </div>
@@ -1062,19 +1063,19 @@
             <div class="advanced-content hidden" id="advancedContent">
                 <div class="form-group">
                     <label class="form-label" for="loginWlanAcName">AC 名称 (wlanacname)</label>
-                    <input type="text" class="form-input" id="loginWlanAcName" placeholder="例如 AuteWifi-XXGC">
+                    <input type="text" class="form-input" id="loginWlanAcName" placeholder="例如 CampusNet-AC-01">
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="loginWlanAcIp">AC IP (wlanacIp)</label>
-                    <input type="text" class="form-input" id="loginWlanAcIp" placeholder="例如 172.18.252.12">
+                    <input type="text" class="form-input" id="loginWlanAcIp" placeholder="例如 172.16.0.1">
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="loginVlan">VLAN ID</label>
-                    <input type="text" class="form-input" id="loginVlan" placeholder="例如 31002201">
+                    <input type="text" class="form-input" id="loginVlan" placeholder="例如 1001">
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="loginMacAddress">网卡物理 MAC (留空自动抓取)</label>
-                    <input type="text" class="form-input" id="loginMacAddress" placeholder="aa:bb:cc:dd:ee:ff">
+                    <input type="text" class="form-input" id="loginMacAddress" placeholder="00:11:22:33:44:55">
                 </div>
                 <div class="form-group">
                     <label class="form-label" for="loginHostname">设备主机名 (留空使用本机名称)</label>
@@ -1085,8 +1086,7 @@
 
         <div class="btn-group" style="margin-top: 14px;">
             <button class="btn btn-secondary" id="loginConfigCancelBtn" onclick="cancelLoginConfig()">稍后</button>
-            <button class="btn btn-secondary" onclick="saveLoginProfile(false)">💾 仅保存</button>
-            <button class="btn btn-success" onclick="saveLoginProfile(true)">🚀 保存并登录</button>
+            <button class="btn btn-primary" onclick="saveLoginProfile(false)">💾 保存配置</button>
         </div>
     </div>
 

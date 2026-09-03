@@ -632,9 +632,9 @@ exit $code              --non-interactive 模式直接退出,交互模式 Read-H
 
 ```json
 {
-  "BaseURL": "http://172.18.252.12:6060/portal.do",
-  "WlanAcName": "XXGC-AC-01",
-  "WlanAcIp": "172.18.252.1",
+  "BaseURL": "http://172.16.x.x:6060/portal.do",
+  "WlanAcName": "CampusNet-AC-01",
+  "WlanAcIp": "172.16.0.1",
   "Ssid": "XXGCXY-Student",
   "Version": "0",
   "PortalPageId": "3",
