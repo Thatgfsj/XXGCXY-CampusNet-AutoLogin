@@ -243,10 +243,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.5
-          name: v2.0.5 - 校园网自动登录助手
+          tag_name: v2.0.6
+          name: v2.0.6 - 校园网自动登录助手
           body: |
-            v2.0.5 - 校园网自动登录助手
+            v2.0.6 - 校园网自动登录助手
 
             ## 系统要求
 
@@ -257,16 +257,25 @@ jobs:
             ## 下载
 
             **Windows (系统 PowerShell 5.1+, 体积小)**
-            - `xxgcxy-wifi_2.0.5_x64-setup.exe` - NSIS installer (~5 MB)
-            - `xxgcxy-wifi_2.0.5_x64_zh-CN.msi` - MSI installer (~6 MB)
+            - `xxgcxy-wifi_2.0.6_x64-setup.exe` - NSIS installer (~5 MB)
+            - `xxgcxy-wifi_2.0.6_x64_zh-CN.msi` - MSI installer (~6 MB)
 
             **Linux**
-            - `xxgcxy-wifi_2.0.5_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v2.0.5-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-2.0.5-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_2.0.6_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v2.0.6-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-2.0.6-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs curl or python3)
+
+            ## What's New in v2.0.6
+
+            ### 🎨 客户端 UI 深度重构 (Dark Acrylic Glassmorphism)
+            - **深色极客毛玻璃视效**: 采用深空流光微粒背景、24px 高斯模糊磨砂亚克力面板、超细 1px 微光边框。
+            - **动态网络雷达环 (Hero Gauge)**: 140px 发光动态仪表盘，在线/待登录/掉线/检测中状态呼吸变色，直观醒目。
+            - **学生身份名片 (Profile Card)**: 专属科技感头像、学号展示、移动/联通/电信专属品牌微光标签与一键更改抽屉。
+            - **智能滑动开关 & 胶囊操作**: 扁平化无缝滑动开关与微光悬浮按键。
+            - **可折叠活动时间轴 (Activity Terminal)**: 终端等宽字体，支持 `[+]` 绿标、`[!]` 红标、`[*]` 蓝标语义化高亮。
 
             ## What's New in v2.0.5
 
