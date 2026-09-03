@@ -152,7 +152,11 @@ log_info "    IP=$WLAN_USER_IP MAC=$MAC SSID=$SSID"
 
 # 构造 quickauth.do URL
 log_info "[*] 步骤 2: 构造认证请求 URL..."
-AUTH_URL=$(echo "$BASE_URL" | sed -E 's|/[A-Za-z0-9_-]+\.do$|/quickauth.do|')
+CLEAN_BASE=$(echo "$BASE_URL" | cut -d'?' -f1 | cut -d'#' -f1)
+AUTH_URL=$(echo "$CLEAN_BASE" | sed -E 's|/[A-Za-z0-9_-]+\.do$|/quickauth.do|')
+if [[ "$AUTH_URL" != *"/quickauth.do" ]]; then
+    AUTH_URL="${AUTH_URL%/}/quickauth.do"
+fi
 [[ -z "$HOSTNAME_VAL" ]] && HOSTNAME_VAL=$(hostname)
 
 TIMESTAMP=$(date +%s)000
@@ -234,38 +238,42 @@ if [[ -z "$RESPONSE" ]]; then
 fi
 
 log_info "[*] 步骤 4: 判定..."
-# 提取 code/message 摘要
-RESP_CODE=$(echo "$RESPONSE" | grep -oE '"code"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-RESP_MSG=$(echo "$RESPONSE" | grep -oE '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+# 优先使用 python3 解析 JSON, 提取 code/message 摘要
+RESP_CODE=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('code',''))" 2>/dev/null || echo "")
+RESP_MSG=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('message',''))" 2>/dev/null || echo "")
+
+if [[ -z "$RESP_CODE" ]]; then
+    RESP_CODE=$(echo "$RESPONSE" | grep -oE '"code"[[:space:]]*:[[:space:]]*"?[0-9]+' | head -1 | grep -oE '[0-9]+')
+fi
+if [[ -z "$RESP_MSG" ]]; then
+    RESP_MSG=$(echo "$RESPONSE" | grep -oE '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+fi
 
 # 判定结果 (跟 PS 端一致)
-# 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
-# "code":1 (账号不存在), "code":440 会被误判成 "code":44 (非法接入)。
-# grep -E 不支持 lookahead, 用 ([^0-9]|$) 达到同样效果。
-if echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*0([^0-9]|$)' \
-   || echo "$RESPONSE" | grep -q "success" \
-   || echo "$RESPONSE" | grep -q "认证成功"; then
-    # 成功: 只打印摘要
+if [[ "$RESP_CODE" == "0" ]] || echo "$RESPONSE" | grep -q "success" || echo "$RESPONSE" | grep -q "认证成功"; then
     log_info "    code=$RESP_CODE  msg=$RESP_MSG"
     log_success "[+] 认证成功"
     exit 0
-elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*1([^0-9]|$)' \
-     || echo "$RESPONSE" | grep -q "账号不存在"; then
-    # 失败: 打印摘要 + 完整响应
+elif [[ "$RESP_CODE" == "1" ]] || echo "$RESPONSE" | grep -q "账号不存在"; then
     log_info "    code=$RESP_CODE  msg=$RESP_MSG"
     log_info "    完整响应: $RESPONSE"
-    log_error "[!] 认证失败:账号不存在"
+    [[ -z "$RESP_MSG" ]] && RESP_MSG="账号不存在"
+    log_error "[!] 认证未通过: $RESP_MSG"
     exit 1
-elif echo "$RESPONSE" | grep -qE '"code"[[:space:]]*:[[:space:]]*44([^0-9]|$)' \
-     || echo "$RESPONSE" | grep -q "非法接入"; then
+elif [[ "$RESP_CODE" == "44" ]] || echo "$RESPONSE" | grep -q "非法接入"; then
     log_info "    code=$RESP_CODE  msg=$RESP_MSG"
     log_info "    完整响应: $RESPONSE"
-    log_error "[!] 认证失败:非法接入 (VLAN/MAC 不匹配)"
+    [[ -z "$RESP_MSG" ]] && RESP_MSG="非法接入 (VLAN/MAC 不匹配)"
+    log_error "[!] 认证失败: $RESP_MSG"
     exit 44
 else
-    # 未知: 打印完整响应
     log_info "    code=$RESP_CODE  msg=$RESP_MSG"
     log_info "    完整响应: $RESPONSE"
-    log_warn "[!] 认证结果未知"
-    exit 99
+    if [[ -n "$RESP_MSG" ]]; then
+        log_error "[!] 认证未通过: $RESP_MSG (code=$RESP_CODE)"
+        exit 1
+    else
+        log_warn "[!] 认证结果未知"
+        exit 99
+    fi
 fi

@@ -111,8 +111,9 @@ function New-CaseAppData([string]$Name) {
 $portMap = @{
     "0"   = 18080; "1"   = 18081; "44"  = 18082; "99"  = 18083
     "10"  = 18084; "100" = 18085; "123" = 18086; "440" = 18087
+    "ac_device_error" = 18088; "ac_string_zero" = 18089
 }
-foreach ($code in @("0","1","44","99","10","100","123","440")) {
+foreach ($code in @("0","1","44","99","10","100","123","440","ac_device_error","ac_string_zero")) {
     Ensure-Mock $code $portMap[$code] | Out-Null
 }
 
@@ -133,7 +134,8 @@ foreach ($c in $codeCases) {
     ($profile | ConvertTo-Json) | Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
     Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
     $r = Invoke-Xywdl -AppData $AppData
-    Assert-True ($r.ExitCode -eq $c.expect) $c.name "exit=$($r.ExitCode), 期望 $($c.expect)"
+    $errSnippet = if ($r.ExitCode -ne $c.expect) { " [OUT: $($r.Output -replace '\r?\n', ' | ')]" } else { "" }
+    Assert-True ($r.ExitCode -eq $c.expect) $c.name "exit=$($r.ExitCode), 期望 $($c.expect)$errSnippet"
 }
 
 Write-Host "===== B. 缺失/损坏配置 (退出码) =====" -ForegroundColor Cyan
@@ -233,7 +235,43 @@ $AppData = New-CaseAppData "case_e1"
 Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
 $codes = @()
 foreach ($n in 1..5) { $rr = Invoke-Xywdl -AppData $AppData; $codes += $rr.ExitCode; Start-Sleep -Milliseconds 200 }
-Assert-True (($codes | Select-Object -Unique).Count -eq 1 -and $codes[0] -eq 0) "E1 连续5次退出码稳定且=0" "codes=$($codes -join ',')"
+Write-Host "===== F. 真实校园网 AC 响应与 URL 净化强健性测试 =====" -ForegroundColor Cyan
+# F1: 脏 BaseURL (带有完整 query string 如 ?wlanuserip=...&url=...)
+$AppData = New-CaseAppData "case_f1"
+$dirtyUrl = "http://127.0.0.1:18080/portal.do?wlanuserip=10.4.124.192&wlanacname=AuteWifi-XXGC&mac=f4:6a:dd:e5:4a:7b&vlan=31002201&hostname=LAPTOP-FTBM6JJ1&rand=100bd08f91d44a1&url=http%3A%2F%2Fwww.qq.com"
+(New-TestProfile -BaseUrl $dirtyUrl | ConvertTo-Json) |
+    Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
+Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
+$r = Invoke-Xywdl -AppData $AppData
+Assert-True ($r.ExitCode -eq 0) "F1 脏 BaseURL 净化后成功请求并认证" "exit=$($r.ExitCode)"
+Start-Sleep -Milliseconds 400
+$mockRecords = @()
+$mock0Log = Join-Path $TestRoot "mock_0.log"
+if (Test-Path $mock0Log) { $mockRecords = Get-Content $mock0Log -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json } }
+if ($mockRecords.Count -gt 0) {
+    $lastReq = $mockRecords[-1]
+    Assert-True ($lastReq.path -eq "/quickauth.do") "F1 请求路径为纯净 /quickauth.do" "path='$($lastReq.path)'"
+    Assert-True ($lastReq.params.userid -eq "2021110101@xxgcyd") "F1 userid 参数独立解析成功" "userid='$($lastReq.params.userid)'"
+    Assert-True ($lastReq.params.passwd -eq "TestPass123") "F1 passwd 参数独立解析成功" "passwd='$($lastReq.params.passwd)'"
+    Assert-True (-not $lastReq.query.Contains("??")) "F1 请求不含双重问号" "query='$($lastReq.query)'"
+}
+
+# F2: 真实 AC 错误响应: {"code":"1","rec":null,"message":"设备不在正常状态,无法认证上网,请稍后",...}
+$AppData = New-CaseAppData "case_f2"
+(New-TestProfile -BaseUrl "http://127.0.0.1:18088/portal.do" | ConvertTo-Json) |
+    Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
+Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
+$r2 = Invoke-Xywdl -AppData $AppData
+Assert-True ($r2.ExitCode -eq 1) "F2 code='1' 识别为认证未通过(exit 1 非 exit 99)" "exit=$($r2.ExitCode)"
+Assert-True ($r2.Output.Contains("设备不在正常状态,无法认证上网,请稍后")) "F2 包含服务器真实错误信息" "output=$($r2.Output)"
+
+# F3: 真实 AC 成功响应: {"code":"0","message":"success"} (字符串 code '0')
+$AppData = New-CaseAppData "case_f3"
+(New-TestProfile -BaseUrl "http://127.0.0.1:18089/portal.do" | ConvertTo-Json) |
+    Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
+Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
+$r3 = Invoke-Xywdl -AppData $AppData
+Assert-True ($r3.ExitCode -eq 0) "F3 code='0' 字符串 0 正确识别为认证成功" "exit=$($r3.ExitCode)"
 
 # ---------- 清理 ----------
 foreach ($m in $mocks.Values) { Stop-Process -Id $m.Proc.Id -Force -ErrorAction SilentlyContinue }

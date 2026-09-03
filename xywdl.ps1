@@ -389,8 +389,13 @@ function Get-WifiIpAddress {
     # 路径 1: Win 8+ Get-NetIPAddress (如果有 IfIndex 字段)
     if (Test-NetTCPIPModule -and $ad.PSObject.Properties.Name -contains 'IfIndex') {
         try {
-            $ip = Get-NetIPAddress -InterfaceIndex $ad.IfIndex -AddressFamily IPv4 -ErrorAction Stop
-            if ($ip) { return $ip.IPAddress }
+            $ips = Get-NetIPAddress -InterfaceIndex $ad.IfIndex -AddressFamily IPv4 -ErrorAction Stop
+            foreach ($ipObj in $ips) {
+                $addr = $ipObj.IPAddress
+                if ($addr -and $addr -notlike '169.254.*' -and $addr -ne '127.0.0.1') {
+                    return $addr
+                }
+            }
         } catch {}
     }
     # 路径 2: WMI Win32_NetworkAdapterConfiguration (Win NT 4.0+ 都有)
@@ -402,9 +407,11 @@ function Get-WifiIpAddress {
             $cfg = Get-WmiObject Win32_NetworkAdapterConfiguration |
                 Where-Object { $_.Index -eq $idx }
             if ($cfg -and $cfg.IPAddress) {
-                # WMI IPAddress 是字符串数组, 取第一个 IPv4
+                # WMI IPAddress 是字符串数组, 取第一个有效局域网 IPv4
                 foreach ($ip in $cfg.IPAddress) {
-                    if ($ip -match '^\d+\.\d+\.\d+\.\d+$') { return $ip }
+                    if ($ip -match '^\d+\.\d+\.\d+\.\d+$' -and $ip -notlike '169.254.*' -and $ip -ne '127.0.0.1') {
+                        return $ip
+                    }
                 }
             }
         }
@@ -412,10 +419,15 @@ function Get-WifiIpAddress {
     # 路径 3: 兜底 ipconfig
     try {
         $ipconfig = ipconfig
-        $line = $ipconfig | Select-String -Pattern 'IPv4'
-        if ($line) {
+        $lines = $ipconfig | Select-String -Pattern 'IPv4'
+        foreach ($line in $lines) {
             $match = [regex]::Match($line.ToString(), '(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})')
-            if ($match.Success) { return $match.Groups[1].Value }
+            if ($match.Success) {
+                $addr = $match.Groups[1].Value
+                if ($addr -notlike '169.254.*' -and $addr -ne '127.0.0.1') {
+                    return $addr
+                }
+            }
         }
     } catch {}
     return $null
@@ -487,6 +499,14 @@ function Invoke-CampusLogin {
     # 1. 拿运行时网络信息
     Write-Host "[步骤 1/5] 拿网络信息..." -ForegroundColor Cyan
     $localIp = Get-WifiIpAddress
+    if (-not $localIp) {
+        # 刚连上 WiFi 时 DHCP 尚未就绪，重试等待最多 3 秒
+        for ($retry = 0; $retry -lt 3; $retry++) {
+            Start-Sleep -Seconds 1
+            $localIp = Get-WifiIpAddress
+            if ($localIp) { break }
+        }
+    }
     $localMac = Get-WirelessMacAddress
     if ($localIp)  { $wlanUserIp = $localIp }  else { $wlanUserIp = $profile.wlan_user_ip }
     if ($localMac) { $macAddress = $localMac } else { $macAddress = $profile.mac_address }
@@ -515,8 +535,13 @@ function Invoke-CampusLogin {
     $version      = if ($profile.version)        { $profile.version }        else { "0" }
     $bindCtrlId   = if ($profile.bind_ctrl_id)   { $profile.bind_ctrl_id}   else { "" }
 
-    $authUrl = $profile.base_url -replace '/\w+\.do', '/quickauth.do'
-    Write-Host "    $authUrl" -ForegroundColor Gray
+    # 防御性净化 BaseURL: 剥离问号和井号及其后的所有参数
+    $cleanBase = $profile.base_url.Split('?')[0].Split('#')[0].Trim()
+    $authUrl = $cleanBase -replace '/\w+\.do', '/quickauth.do'
+    if ($authUrl -notmatch '/quickauth\.do$') {
+        $authUrl = $authUrl.TrimEnd('/') + '/quickauth.do'
+    }
+    Write-Host "    接口: $authUrl" -ForegroundColor Gray
 
     # 烟囱 29.2 修复: [Uri]::EscapeDataString 对超长字符串会抛 UriFormatException
     # 用 try/catch 包裹, 失败时退化为 PowerShell 自带 [uri]::EscapeDataString / [Web.HttpUtility]::UrlEncode
@@ -555,8 +580,8 @@ function Invoke-CampusLogin {
         "bindCtrlId=$(Safe-UriEscape $bindCtrlId)"
     ) -join "&"
     $requestUrl = $authUrl + "?" + $queryParams
-    # 安全: 不要在日志/控制台打印明文密码, 只显示脱敏后的 passwd=***
     $maskedUrl = $requestUrl -replace '(?i)(passwd=)[^&]*', '$1***'
+    Write-Host "    请求: $maskedUrl" -ForegroundColor DarkGray
     Write-Host "[步骤 3/5] 完成" -ForegroundColor Green
     Write-Host ""
 
@@ -696,45 +721,63 @@ function Invoke-CampusLogin {
         return 99
     }
 
-    # 提取响应摘要 (code + message)
-    # 找 "code":"X" 和 "message":"..."
+    # 提取响应摘要 (优先使用 JSON 解析器, 兼顾数字与字符串)
     $respCode = ""
     $respMsg = ""
-    if ($body -match '"code"\s*:\s*"([^"]*)"') { $respCode = $Matches[1] }
-    if ($body -match '"message"\s*:\s*"([^"]*)"') { $respMsg = $Matches[1] }
+    try {
+        $respObj = $body | ConvertFrom-Json -ErrorAction SilentlyContinue
+        if ($respObj) {
+            if ($null -ne $respObj.code) { $respCode = [string]$respObj.code }
+            if ($null -ne $respObj.message) { $respMsg = [string]$respObj.message }
+        }
+    } catch {}
 
-    # 注意: code 匹配必须锚定 "后面不能紧跟数字", 否则 "code":10/100/123 会被误判成
-    # "code":1 (账号不存在), "code":440 会被误判成 "code":44 (非法接入)。
-    if ($body -match '"code"\s*:\s*0(?!\d)' -or $body -match "success" -or $body -match "认证成功") {
-        # 成功: 只打印摘要
+    # 正则兜底提取 (兼顾带双引号与无引号的 code)
+    if ([string]::IsNullOrEmpty($respCode)) {
+        if ($body -match '"code"\s*:\s*"?([^",\s}]+)"?') { $respCode = $Matches[1] }
+    }
+    if ([string]::IsNullOrEmpty($respMsg)) {
+        if ($body -match '"message"\s*:\s*"([^"]*)"') { $respMsg = $Matches[1] }
+    }
+
+    # 判定结果
+    if ($respCode -eq "0" -or $body -match "success" -or $body -match "认证成功") {
+        # 成功: 打印摘要
         Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
         Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
         Write-Host ""
         Write-Host "[+] 认证成功" -ForegroundColor Green
         return 0
-    } elseif ($body -match '"code"\s*:\s*1(?!\d)' -or $body -match "账号不存在") {
-        # 失败: 打印摘要 + 完整 body (方便排查)
+    } elseif ($respCode -eq "1" -or $body -match "账号不存在") {
+        # 认证未通过: 打印摘要 + 真实服务器错误信息
         Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
         Write-Host "    完整响应: $body" -ForegroundColor DarkGray
         Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
         Write-Host ""
-        Write-Host "[!] 认证失败:账号不存在" -ForegroundColor Red
+        $displayMsg = if (-not [string]::IsNullOrWhiteSpace($respMsg)) { $respMsg } else { "账号不存在" }
+        Write-Host "[!] 认证未通过: $displayMsg" -ForegroundColor Red
         return 1
-    } elseif ($body -match '"code"\s*:\s*44(?!\d)' -or $body -match "非法接入") {
+    } elseif ($respCode -eq "44" -or $body -match "非法接入") {
         Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
         Write-Host "    完整响应: $body" -ForegroundColor DarkGray
         Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
         Write-Host ""
-        Write-Host "[!] 认证失败:非法接入" -ForegroundColor Red
+        $displayMsg = if (-not [string]::IsNullOrWhiteSpace($respMsg)) { $respMsg } else { "非法接入 (VLAN/MAC 不匹配)" }
+        Write-Host "[!] 认证失败: $displayMsg" -ForegroundColor Red
         return 44
     } else {
-        # 未知: 打印完整 body
+        # 其他业务返回码或未知响应
         Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
         Write-Host "    完整响应: $body" -ForegroundColor DarkGray
         Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
         Write-Host ""
-        Write-Host "[!] 认证结果未知" -ForegroundColor Yellow
-        return 99
+        if (-not [string]::IsNullOrWhiteSpace($respMsg)) {
+            Write-Host "[!] 认证未通过: $respMsg (code=$respCode)" -ForegroundColor Red
+            return 1
+        } else {
+            Write-Host "[!] 认证结果未知" -ForegroundColor Yellow
+            return 99
+        }
     }
 }
 
@@ -771,13 +814,13 @@ try {
     if ($code -eq 0) {
         Write-Host "[+] 登录成功!" -ForegroundColor Green
     } elseif ($code -eq 1) {
-        Write-Host "[!] 登录失败: 账号不存在" -ForegroundColor Red
+        Write-Host "[!] 登录失败: 认证未通过 (请查看上方服务器返回的具体提示)" -ForegroundColor Red
     } elseif ($code -eq 44) {
         Write-Host "[!] 登录失败: 非法接入 (VLAN/MAC 不匹配)" -ForegroundColor Red
     } elseif ($code -eq 99) {
-        Write-Host "[!] 登录失败: 未知错误" -ForegroundColor Red
+        Write-Host "[!] 登录失败: 无法连接服务器或未知错误" -ForegroundColor Red
     } else {
-        Write-Host "[!] 登录失败: 未知返回码 $code" -ForegroundColor Red
+        Write-Host "[!] 登录失败: 返回码 $code" -ForegroundColor Red
     }
 
     if ($args -contains '--non-interactive') {

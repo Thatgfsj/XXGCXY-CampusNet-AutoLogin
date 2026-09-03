@@ -586,11 +586,12 @@
             <label class="form-label" for="loginBaseUrl">Portal URL <span style="color:#888; font-weight:normal;">(必填)</span></label>
             <div class="form-row">
                 <input type="text" class="form-input" id="loginBaseUrl"
-                       placeholder="http://172.18.x.x:6060/portal.do">
+                       placeholder="http://172.18.x.x:6060/portal.do"
+                       onpaste="setTimeout(parsePortalUrl, 100)">
                 <button type="button" class="btn-parse" onclick="parsePortalUrl()">解析</button>
             </div>
             <div class="form-hint">
-                连接校园网 WiFi 后,浏览器访问任意网站,复制地址栏完整 URL 粘贴到此处,然后点「解析」自动填充下方字段
+                连接校园网 WiFi 后,浏览器访问任意网站,复制地址栏完整 URL 粘贴到此处(粘贴后自动解析),也可点「解析」手动提取字段
             </div>
         </div>
 
@@ -1239,13 +1240,13 @@
             if (portalParsing) {
                 return;
             }
-            const url = document.getElementById('loginBaseUrl').value.trim();
+            const rawUrl = document.getElementById('loginBaseUrl').value.trim();
             const errEl = document.getElementById('loginConfigError');
             const okEl = document.getElementById('loginConfigSuccess');
             errEl.style.display = 'none';
             okEl.style.display = 'none';
 
-            if (!url) {
+            if (!rawUrl) {
                 errEl.textContent = '请先粘贴 Portal URL';
                 errEl.style.display = 'block';
                 return;
@@ -1255,19 +1256,18 @@
             const parseBtn = document.querySelector('.form-row .btn-parse');
             if (parseBtn) { parseBtn.disabled = true; }
             try {
-                const parsed = await invoke('parse_portal_url', { url });
-                // 跟 saveLoginProfile 一致, 只在表单空时回填, 不覆盖用户已填的值
-                const setIfEmpty = (id, val) => {
-                    if (!val) { return; }
-                    const el = document.getElementById(id);
-                    if (el && !el.value.trim()) { el.value = val; }
-                };
-                setIfEmpty('loginBaseUrl', parsed.base_url);
-                setIfEmpty('loginWlanAcName', parsed.wlan_ac_name);
-                setIfEmpty('loginWlanAcIp', parsed.wlan_ac_ip);
-                setIfEmpty('loginVlan', parsed.vlan);
-                setIfEmpty('loginMacAddress', parsed.mac_address);
-                setIfEmpty('loginHostname', parsed.hostname);
+                const parsed = await invoke('parse_portal_url', { url: rawUrl });
+                // 重点：将 BaseURL 输入框显式更新为纯净的 base_url，剥离所有 query string
+                if (parsed.base_url) {
+                    const clean = parsed.base_url.split('?')[0].split('#')[0].trim();
+                    document.getElementById('loginBaseUrl').value = clean;
+                }
+                // 用户点击或自动解析时，直接回填提取出的网络参数
+                if (parsed.wlan_ac_name) document.getElementById('loginWlanAcName').value = parsed.wlan_ac_name;
+                if (parsed.wlan_ac_ip) document.getElementById('loginWlanAcIp').value = parsed.wlan_ac_ip;
+                if (parsed.vlan) document.getElementById('loginVlan').value = parsed.vlan;
+                if (parsed.mac_address) document.getElementById('loginMacAddress').value = parsed.mac_address;
+                if (parsed.hostname) document.getElementById('loginHostname').value = parsed.hostname;
 
                 // 展开高级字段让用户看到结果
                 const content = document.getElementById('advancedContent');
@@ -1275,8 +1275,9 @@
                     toggleAdvanced();
                 }
 
-                okEl.textContent = '✓ 解析成功,字段已自动填充';
+                okEl.textContent = '✓ 解析成功,已提取参数并净化 Portal 地址';
                 okEl.style.display = 'block';
+                addLog('Portal URL 解析成功，已自动提取 AC/VLAN 等网络参数并净化地址');
             } catch (e) {
                 errEl.textContent = '解析失败: ' + e;
                 errEl.style.display = 'block';
@@ -1298,7 +1299,7 @@
             const operator = document.getElementById('loginOperator').value;
             const studentId = document.getElementById('loginStudentId').value.trim();
             const password = document.getElementById('loginPassword').value;
-            const baseUrl = document.getElementById('loginBaseUrl').value.trim();
+            const rawBaseUrl = document.getElementById('loginBaseUrl').value.trim();
 
             if (!studentId) {
                 errEl.textContent = '请输入学号';
@@ -1315,7 +1316,7 @@
                 errEl.style.display = 'block';
                 return;
             }
-            if (!baseUrl) {
+            if (!rawBaseUrl) {
                 errEl.textContent = '请输入 Portal URL';
                 errEl.style.display = 'block';
                 return;
@@ -1327,43 +1328,37 @@
             }[operator] || '';
             const userId = studentId + operatorSuffix;
 
-            // 在保存前自动调一次 parse_portal_url, 把 Portal URL 中能解析出的字段回填到表单
-            // (只有当用户没填这些字段时才回填, 不覆盖用户已填的值)
-            // 这样用户不需要手动点"解析"按钮也能正常工作
-            try {
-                const parsed = await invoke('parse_portal_url', { url: baseUrl });
-                const setIfEmpty = (id, val) => {
-                    if (!val) { return; }
-                    const el = document.getElementById(id);
-                    if (el && !el.value.trim()) { el.value = val; }
-                };
-                if (parsed.base_url) {
-                    setIfEmpty('loginBaseUrl', parsed.base_url);
-                }
-                setIfEmpty('loginWlanAcName', parsed.wlan_ac_name);
-                setIfEmpty('loginWlanAcIp', parsed.wlan_ac_ip);
-                setIfEmpty('loginVlan', parsed.vlan);
-                setIfEmpty('loginMacAddress', parsed.mac_address);
-                setIfEmpty('loginHostname', parsed.hostname);
-                addLog('已从 Portal URL 解析字段: ' +
-                    ['base_url', 'wlan_ac_name', 'wlan_ac_ip', 'vlan', 'mac_address', 'hostname']
-                        .filter(k => parsed[k]).map(k => k + '=' + parsed[k]).join(', '));
-            } catch (e) {
-                // 解析失败不阻塞保存, 字段空着也行 (PS 脚本里有自动探测兜底)
-                // 但要告诉用户原因, 让他知道可能要手动点"解析"或填写高级字段
-                const errStr = String(e);
-                if (errStr.includes('必须以 http://') || errStr.includes('.do')) {
-                    addLog('Portal URL 格式无效: ' + errStr + ' (请改成 http://host:port/portal.do 形式)');
-                } else {
-                    addLog('Portal URL 自动解析失败: ' + errStr + ' (PS 脚本会尝试自动探测, 如登录仍失败请手动点"解析"按钮)');
+            // 净化 BaseURL：剥离问号和井号后的参数
+            let cleanBaseUrl = rawBaseUrl.split('?')[0].split('#')[0].trim();
+
+            // 如果输入的 rawBaseUrl 含有 query string，尝试自动解析并补全高级字段
+            if (rawBaseUrl.includes('?')) {
+                try {
+                    const parsed = await invoke('parse_portal_url', { url: rawBaseUrl });
+                    if (parsed.base_url) {
+                        cleanBaseUrl = parsed.base_url.split('?')[0].split('#')[0].trim();
+                    }
+                    const setIfEmpty = (id, val) => {
+                        if (!val) { return; }
+                        const el = document.getElementById(id);
+                        if (el && !el.value.trim()) { el.value = val; }
+                    };
+                    setIfEmpty('loginWlanAcName', parsed.wlan_ac_name);
+                    setIfEmpty('loginWlanAcIp', parsed.wlan_ac_ip);
+                    setIfEmpty('loginVlan', parsed.vlan);
+                    setIfEmpty('loginMacAddress', parsed.mac_address);
+                    setIfEmpty('loginHostname', parsed.hostname);
+                } catch (e) {
+                    // 忽略解析错误，继续走保存流程
                 }
             }
+            document.getElementById('loginBaseUrl').value = cleanBaseUrl;
 
             const profile = {
                 user_id: userId,
                 operator: operator,
                 ssid: '',  // 删了 UI 字段, 这里保持空串兼容老 profile; PS 端 Get-CurrentSsid 兜底
-                base_url: document.getElementById('loginBaseUrl').value.trim(),
+                base_url: cleanBaseUrl,
                 wlan_ac_name: document.getElementById('loginWlanAcName').value.trim(),
                 wlan_ac_ip: document.getElementById('loginWlanAcIp').value.trim(),
                 vlan: document.getElementById('loginVlan').value.trim(),
@@ -1570,9 +1565,15 @@
         // 添加日志
         // 用 textContent 不用 innerHTML 避免 XSS (PS 输出含 < > & 字符时不会被解析)
         function addLog(message) {
-            // 多行 message 按 \n 拆成多条, 否则 <span> 不换行
-            const lines = String(message).split('\n');
+            if (message === null || message === undefined) return;
+            // 多行 message 按 \r?\n 拆成多条, 过滤掉纯空行
+            const lines = String(message).split(/\r?\n/);
             lines.forEach(line => {
+                const trimmed = line.trim();
+                // 纯空白行跳过，绝不打上只有时间戳的空白条目
+                if (!trimmed) {
+                    return;
+                }
                 const logBox = document.getElementById('logBox');
                 const now = new Date();
                 const time = now.toTimeString().split(' ')[0];
@@ -1585,7 +1586,7 @@
                 timeSpan.textContent = `[${time}]`;
 
                 const msgSpan = document.createElement('span');
-                msgSpan.textContent = ' ' + line;
+                msgSpan.textContent = ' ' + trimmed;
 
                 entry.appendChild(timeSpan);
                 entry.appendChild(msgSpan);

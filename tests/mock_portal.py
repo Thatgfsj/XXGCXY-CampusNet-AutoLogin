@@ -27,6 +27,8 @@ RESPONSE_TEMPLATES = {
     "auth_success_cn": '{"result":1,"info":"认证成功"}',
     "no_user_text": '{"result":0,"info":"账号不存在"}',
     "illegal_text": '{"result":0,"info":"非法接入"}',
+    "ac_device_error": '{"code":"1","rec":null,"message":"设备不在正常状态,无法认证上网,请稍后","wlanacIp":null}',
+    "ac_string_zero": '{"code":"0","rec":null,"message":"success","wlanacIp":null}',
 }
 
 

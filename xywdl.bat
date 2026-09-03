@@ -86,14 +86,18 @@ echo [执行] %PS_EXE% -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
 set "EXIT_CODE=%errorlevel%"
 
 if %EXIT_CODE% neq 0 (
-    echo.
-    echo [错误] 脚本执行失败，错误码: %EXIT_CODE%
-    echo.
-    echo 常见问题:
-    echo   1. 确保已连接校园网 WiFi
-    echo   2. 检查 PowerShell 是否正常工作 (在 cmd 跑 powershell -Command "$PSVersionTable.PSVersion")
-    echo   3. 尝试以管理员身份运行
-    if "%INTERACTIVE%"=="1" pause
+    if "%INTERACTIVE%"=="1" (
+        echo.
+        echo [错误] 脚本执行失败，错误码: %EXIT_CODE%
+        echo.
+        echo 常见问题:
+        echo   1. 确保已连接校园网 WiFi
+        echo   2. 检查 PowerShell 是否正常工作 (在 cmd 跑 powershell -Command "$PSVersionTable.PSVersion")
+        echo   3. 尝试以管理员身份运行
+        pause
+    ) else (
+        echo [错误] 脚本退出，错误码: %EXIT_CODE%
+    )
     exit /b %EXIT_CODE%
 )
 
