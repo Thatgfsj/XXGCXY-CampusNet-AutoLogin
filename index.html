@@ -5,626 +5,1088 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>校园网助手</title>
     <style>
+        :root {
+            --bg-base: #0a0b12;
+            --bg-card: rgba(22, 25, 39, 0.72);
+            --bg-card-hover: rgba(30, 34, 53, 0.85);
+            --bg-input: rgba(255, 255, 255, 0.05);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --border-glow: rgba(99, 102, 241, 0.4);
+            --text-main: #f3f4f6;
+            --text-sub: #9ca3af;
+            --text-muted: #64748b;
+            --accent-primary: #6366f1;
+            --accent-primary-hover: #4f46e5;
+            --accent-cyan: #06b6d4;
+            --status-ok: #10b981;
+            --status-warn: #f59e0b;
+            --status-err: #ef4444;
+            --radius-lg: 20px;
+            --radius-md: 12px;
+            --radius-sm: 8px;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            user-select: none;
         }
-        
+
         body {
-            font-family: "Microsoft YaHei", "微软雅黑", sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: var(--bg-base);
+            color: var(--text-main);
             min-height: 100vh;
             display: flex;
             justify-content: center;
-            align-items: center;
-            color: #333;
+            align-items: flex-start;
+            overflow-x: hidden;
+            position: relative;
         }
-        
+
+        /* 背景流光光斑 (Ambient Glow Orbs) */
+        .ambient-glow-1 {
+            position: fixed;
+            top: -100px;
+            left: -60px;
+            width: 320px;
+            height: 320px;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.22) 0%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+            filter: blur(20px);
+        }
+        .ambient-glow-2 {
+            position: fixed;
+            bottom: -80px;
+            right: -60px;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(6, 182, 212, 0.16) 0%, transparent 70%);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+            filter: blur(25px);
+        }
+
+        /* 滚动条定制 */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); }
+
+        /* 主容器 */
         .container {
-            background: white;
-            border-radius: 16px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            padding: 40px;
-            width: 90%;
-            max-width: 500px;
-        }
-        
-        h1 {
-            text-align: center;
-            color: #667eea;
-            margin-bottom: 30px;
-            font-size: 28px;
-        }
-        
-        .status-box {
-            background: #f8f9fa;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        
-        .status-icon {
-            font-size: 48px;
-            margin-bottom: 10px;
-        }
-        
-        .status-text {
-            font-size: 18px;
-            font-weight: bold;
-            color: #333;
-        }
-        
-        .status-detail {
-            font-size: 14px;
-            color: #666;
-            margin-top: 8px;
-        }
-        
-        .connected {
-            color: #10b981;
-        }
-        
-        .disconnected {
-            color: #ef4444;
-        }
-        
-        .checking {
-            color: #f59e0b;
-        }
-        
-        .network-info {
-            background: #f8f9fa;
-            border-radius: 12px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .network-info h3 {
-            font-size: 16px;
-            margin-bottom: 10px;
-            color: #667eea;
-        }
-        
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .info-row:last-child {
-            border-bottom: none;
-        }
-        
-        .info-label {
-            color: #666;
-        }
-        
-        .info-value {
-            font-weight: bold;
-            color: #333;
-        }
-        
-        .btn {
+            position: relative;
+            z-index: 1;
             width: 100%;
-            padding: 14px;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
+            max-width: 490px;
+            min-height: 100vh;
+            padding: 24px 20px 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            animation: fadeIn .3s ease-out;
+        }
+        .container.hidden { display: none !important; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 顶部 Header */
+        .app-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 4px 2px;
+            margin-bottom: 2px;
+        }
+        .app-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .app-logo-badge {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+            font-size: 18px;
+        }
+        .app-title-group h1 {
+            font-size: 17px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.3px;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .app-ver-pill {
+            font-size: 11px;
+            font-weight: 500;
+            padding: 1px 7px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 20px;
+            color: #a5b4fc;
+        }
+        .header-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #cbd5e1;
+            padding: 6px 13px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
             cursor: pointer;
-            transition: all 0.3s;
-            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(8px);
         }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+        .header-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
         }
-        
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+
+        /* 亚克力基础卡片 */
+        .glass-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(24px) saturate(170%);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-lg);
+            padding: 18px;
+            box-shadow: 0 16px 36px -8px rgba(0, 0, 0, 0.5);
+            position: relative;
+            overflow: hidden;
+            transition: border-color .2s;
         }
-        
-        .btn-secondary {
-            background: #e5e7eb;
-            color: #374151;
+        .glass-card:hover {
+            border-color: rgba(255, 255, 255, 0.14);
         }
-        
-        .btn-secondary:hover {
-            background: #d1d5db;
+
+        /* 1. 核心网络状态雷达环 (Gauge Card) */
+        .gauge-card {
+            padding: 24px 20px 20px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
-        
-        .setup-screen {
-            display: none;
+        .radar-box {
+            position: relative;
+            width: 140px;
+            height: 140px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 14px;
         }
-        
-        .wifi-list {
-            max-height: 300px;
-            overflow-y: auto;
-            margin: 20px 0;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
+        .radar-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
         }
-        
-        .wifi-item {
-            padding: 15px;
-            border-bottom: 1px solid #e5e7eb;
-            cursor: pointer;
-            transition: background 0.2s;
+        .radar-bg-circle {
+            stroke: rgba(255, 255, 255, 0.07);
+            stroke-width: 8;
+            fill: none;
         }
-        
-        .wifi-item:hover {
-            background: #f8f9fa;
+        .radar-meter-circle {
+            stroke: var(--accent-primary);
+            stroke-width: 8;
+            stroke-linecap: round;
+            fill: none;
+            stroke-dasharray: 377;
+            stroke-dashoffset: 60;
+            transition: stroke 0.4s ease, stroke-dashoffset 0.6s ease;
+            filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.6));
         }
-        
-        .wifi-item.selected {
-            background: #e0e7ff;
-            border-left: 4px solid #667eea;
+        .radar-center-content {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
         }
-        
-        .wifi-name {
-            font-weight: bold;
-            color: #333;
+        .status-icon {
+            font-size: 34px;
+            line-height: 1;
+            margin-bottom: 2px;
+            transition: transform 0.3s;
         }
-        
-        .wifi-signal {
-            font-size: 12px;
-            color: #666;
+        .status-pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--status-ok);
+            box-shadow: 0 0 8px var(--status-ok);
+            animation: pulseDot 2s infinite ease-in-out;
             margin-top: 4px;
         }
-        
-        .btn-group {
-            display: flex;
+        @keyframes pulseDot {
+            0%, 100% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.4); opacity: 1; box-shadow: 0 0 14px var(--status-ok); }
+        }
+
+        .status-text {
+            font-size: 19px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            color: #fff;
+            margin-bottom: 4px;
+            transition: color 0.3s;
+        }
+        .status-detail {
+            font-size: 13px;
+            color: var(--text-sub);
+            margin-bottom: 12px;
+        }
+
+        /* 状态对应主题色彩 */
+        .state-connected .radar-meter-circle {
+            stroke: var(--status-ok);
+            stroke-dashoffset: 0;
+            filter: drop-shadow(0 0 10px rgba(16, 185, 129, 0.7));
+        }
+        .state-connected .status-text { color: var(--status-ok); }
+        .state-connected .status-pulse-dot { background: var(--status-ok); box-shadow: 0 0 10px var(--status-ok); }
+
+        .state-needs-login .radar-meter-circle {
+            stroke: var(--status-warn);
+            stroke-dashoffset: 90;
+            filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.7));
+        }
+        .state-needs-login .status-text { color: var(--status-warn); }
+        .state-needs-login .status-pulse-dot { background: var(--status-warn); box-shadow: 0 0 10px var(--status-warn); }
+
+        .state-disconnected .radar-meter-circle {
+            stroke: var(--status-err);
+            stroke-dashoffset: 260;
+            filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.5));
+        }
+        .state-disconnected .status-text { color: var(--status-err); }
+        .state-disconnected .status-pulse-dot { background: var(--status-err); box-shadow: 0 0 8px var(--status-err); }
+
+        .state-checking .radar-meter-circle {
+            stroke: var(--accent-cyan);
+            stroke-dashoffset: 140;
+            animation: radarRotate 1.5s linear infinite;
+        }
+        @keyframes radarRotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* 2. 网络参数指示栏 (Network Info Pills) */
+        .network-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
             gap: 10px;
-            margin-top: 20px;
+            width: 100%;
+            margin-top: 4px;
         }
-        
-        .btn-group .btn {
-            flex: 1;
+        .network-pill {
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: var(--radius-md);
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            text-align: left;
         }
-        
-        .hidden {
-            display: none !important;
+        .pill-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
-        
-        .log-box {
-            background: #1f2937;
-            color: #10b981;
-            padding: 15px;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 12px;
-            max-height: 200px;
-            overflow-y: auto;
-            margin-top: 20px;
+        .pill-val {
+            font-size: 13px;
+            font-weight: 600;
+            color: #e2e8f0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        
-        .log-entry {
-            margin-bottom: 5px;
-        }
-        
-        .log-time {
-            color: #6b7280;
-        }
-        
-        .toggle-container {
+
+        /* 3. 学生身份卡片 (Profile Card) */
+        .profile-card {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 15px;
-            background: #f8f9fa;
+            padding: 14px 16px;
+            background: linear-gradient(135deg, rgba(30, 27, 75, 0.45) 0%, rgba(15, 23, 42, 0.45) 100%);
+        }
+        .profile-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .avatar-box {
+            width: 42px;
+            height: 42px;
             border-radius: 12px;
-            margin-bottom: 20px;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(6, 182, 212, 0.2) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
         }
-        
-        .toggle-label {
-            font-weight: bold;
-            color: #333;
+        .profile-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
         }
-        
+        .profile-id-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .profile-id {
+            font-size: 15px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.5px;
+        }
+        .operator-tag {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-weight: 600;
+            background: rgba(99, 102, 241, 0.2);
+            color: #a5b4fc;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+        .operator-tag.yd { background: rgba(6, 182, 212, 0.15); color: #67e8f9; border-color: rgba(6, 182, 212, 0.3); }
+        .operator-tag.lt { background: rgba(249, 115, 22, 0.15); color: #fdba74; border-color: rgba(249, 115, 22, 0.3); }
+        .operator-tag.dx { background: rgba(59, 130, 246, 0.15); color: #93c5fd; border-color: rgba(59, 130, 246, 0.3); }
+        .profile-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .profile-edit-btn {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #cbd5e1;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .profile-edit-btn:hover {
+            background: rgba(255, 255, 255, 0.14);
+            color: #fff;
+        }
+
+        /* 4. 智能开关组 (Smart Toggles) */
+        .toggles-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-md);
+            backdrop-filter: blur(16px);
+        }
+        .toggle-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .toggle-icon { font-size: 17px; }
+        .toggle-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #e2e8f0;
+        }
         .toggle-switch {
             position: relative;
-            width: 60px;
-            height: 30px;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
         }
-        
         .toggle-switch input {
             opacity: 0;
             width: 0;
             height: 0;
         }
-        
         .toggle-slider {
             position: absolute;
             cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .3s;
-            border-radius: 30px;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
+            border-radius: 24px;
         }
-        
         .toggle-slider:before {
             position: absolute;
             content: "";
-            height: 24px;
-            width: 24px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: .3s;
+            height: 18px;
+            width: 18px;
+            left: 2px;
+            bottom: 2px;
+            background: #fff;
+            transition: .25s cubic-bezier(0.4, 0, 0.2, 1);
             border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
         }
-        
-        input:checked + .toggle-slider {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        .toggle-switch input:checked + .toggle-slider {
+            background: linear-gradient(135deg, #6366f1 0%, #06b6d4 100%);
+            border-color: rgba(99, 102, 241, 0.4);
         }
-        
-        input:checked + .toggle-slider:before {
-            transform: translateX(30px);
-        }
-        
-        .interval-input {
-            width: 80px;
-            padding: 8px 12px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 16px;
-            text-align: center;
-            font-weight: bold;
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(20px);
         }
 
-        .interval-input:focus {
+        /* 5. 按钮系统 */
+        .btn {
+            width: 100%;
+            padding: 13px 18px;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            letter-spacing: 0.3px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             outline: none;
-            border-color: #667eea;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            color: #fff;
+            box-shadow: 0 6px 20px -4px rgba(99, 102, 241, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 26px -4px rgba(99, 102, 241, 0.7);
+            background: linear-gradient(135deg, #7174fa 0%, #5950ee 100%);
+        }
+        .btn-primary:active { transform: translateY(0); }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.07);
+            color: #cbd5e1;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.2);
         }
 
-        .campus-info-box {
-            background: #f8f9fa;
-            border-radius: 12px;
-            padding: 15px;
-            margin-top: 20px;
+        .btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #fff;
+            box-shadow: 0 6px 18px -4px rgba(16, 185, 129, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+        .btn-success:hover {
+            background: linear-gradient(135deg, #18c58c 0%, #08a373 100%);
+            box-shadow: 0 8px 24px -4px rgba(16, 185, 129, 0.6);
+            transform: translateY(-1px);
         }
 
-        /* ===== 登录配置表单 (v1.9.0+) ===== */
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.12);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.22);
+            color: #fff;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            width: 100%;
+        }
+
+        /* 6. 可折叠活动时间轴 (Activity Terminal) */
+        .timeline-card {
+            padding: 0;
+            overflow: hidden;
+        }
+        .timeline-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .timeline-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-sub);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .timeline-arrow {
+            font-size: 11px;
+            color: var(--text-muted);
+            transition: transform 0.25s ease;
+        }
+        .timeline-card.collapsed .timeline-arrow {
+            transform: rotate(-90deg);
+        }
+        .timeline-card.collapsed .log-box {
+            display: none;
+        }
+        .log-box {
+            background: rgba(7, 8, 14, 0.75);
+            max-height: 180px;
+            min-height: 80px;
+            overflow-y: auto;
+            padding: 10px 14px;
+            font-family: "Cascadia Code", Consolas, "Fira Code", monospace;
+            font-size: 11.5px;
+            line-height: 1.6;
+        }
+        .log-entry {
+            margin-bottom: 4px;
+            word-break: break-all;
+            display: flex;
+            gap: 6px;
+            align-items: flex-start;
+        }
+        .log-time {
+            color: #64748b;
+            flex-shrink: 0;
+            font-size: 11px;
+        }
+        .log-msg {
+            color: #cbd5e1;
+            flex-grow: 1;
+        }
+        .log-msg.log-success { color: #34d399; }
+        .log-msg.log-error { color: #f87171; }
+        .log-msg.log-warn { color: #fbbf24; }
+        .log-msg.log-step { color: #38bdf8; }
+
+        /* 7. 表单设计 (WiFi配置与登录配置) */
+        .screen-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+        .back-btn {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.14);
+            transform: translateX(-2px);
+        }
+        .screen-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .screen-sub {
+            font-size: 13px;
+            color: var(--text-sub);
+            margin-bottom: 12px;
+        }
+
         .form-group {
             margin-bottom: 14px;
         }
         .form-label {
             display: block;
-            font-size: 14px;
-            color: #666;
-            margin-bottom: 6px;
+            font-size: 12.5px;
             font-weight: 500;
+            color: #cbd5e1;
+            margin-bottom: 6px;
         }
         .form-input,
         .form-select {
             width: 100%;
-            padding: 10px 12px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 15px;
+            padding: 11px 14px;
+            background: var(--bg-input);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: var(--radius-md);
+            color: #fff;
+            font-size: 13.5px;
             font-family: inherit;
-            box-sizing: border-box;
-            background: #fff;
-            transition: border-color .2s;
+            outline: none;
+            transition: all 0.2s ease;
         }
         .form-input:focus,
         .form-select:focus {
-            outline: none;
-            border-color: #667eea;
+            border-color: var(--accent-primary);
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+        }
+        .form-select option {
+            background: #181b2a;
+            color: #fff;
         }
         .form-hint {
-            font-size: 12px;
-            color: #888;
-            margin-top: 4px;
+            font-size: 11.5px;
+            color: var(--text-muted);
+            margin-top: 5px;
+            line-height: 1.4;
         }
         .form-hint code {
-            background: #f3f4f6;
+            background: rgba(255, 255, 255, 0.08);
+            color: #a5b4fc;
             padding: 1px 5px;
-            border-radius: 3px;
-            font-size: 11px;
+            border-radius: 4px;
         }
         .form-row {
             display: flex;
             gap: 8px;
             align-items: stretch;
         }
-        .form-row .form-input { flex: 1; }
-        .form-row .btn-parse {
-            flex: 0 0 auto;
-            padding: 0 16px;
-            background: #667eea;
+        .btn-parse {
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
             color: #fff;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: bold;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: var(--radius-md);
+            padding: 0 16px;
+            font-size: 13px;
+            font-weight: 600;
             cursor: pointer;
-            transition: background .2s;
+            white-space: nowrap;
+            transition: all 0.2s;
         }
-        .form-row .btn-parse:hover { background: #5568d3; }
-        .form-row .btn-parse:disabled { background: #aaa; cursor: not-allowed; }
+        .btn-parse:hover {
+            background: linear-gradient(135deg, #7174fa 0%, #5950ee 100%);
+            transform: translateY(-1px);
+        }
+        .btn-parse:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
 
-        .advanced-toggle {
-            margin: 14px 0 8px;
-            padding: 8px 12px;
-            background: #f3f4f6;
-            border-radius: 6px;
-            font-size: 13px;
-            color: #555;
-            cursor: pointer;
-            user-select: none;
-            text-align: center;
-        }
-        .advanced-toggle:hover { background: #e5e7eb; }
-        .advanced-content {
-            border-left: 3px solid #e5e7eb;
-            padding-left: 12px;
-            margin-bottom: 12px;
-        }
         .form-error {
-            background: #fee2e2;
-            color: #b91c1c;
-            padding: 10px 12px;
-            border-radius: 6px;
-            font-size: 13px;
-            margin: 10px 0;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            color: #fca5a5;
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            font-size: 12.5px;
+            margin-bottom: 12px;
             display: none;
         }
         .form-success {
-            background: #d1fae5;
-            color: #065f46;
-            padding: 10px 12px;
-            border-radius: 6px;
-            font-size: 13px;
-            margin: 10px 0;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            color: #6ee7b7;
+            padding: 10px 14px;
+            border-radius: var(--radius-md);
+            font-size: 12.5px;
+            margin-bottom: 12px;
             display: none;
         }
 
-        .campus-info-box h3 {
-            font-size: 16px;
-            margin-bottom: 10px;
-            color: #667eea;
+        .advanced-toggle {
+            margin: 14px 0 8px;
+            padding: 10px 14px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px dashed rgba(255, 255, 255, 0.12);
+            border-radius: var(--radius-md);
+            font-size: 12.5px;
+            color: #a5b4fc;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+        .advanced-toggle:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(99, 102, 241, 0.4);
+        }
+        .advanced-content {
+            border-left: 2px solid rgba(99, 102, 241, 0.35);
+            padding-left: 14px;
+            margin: 10px 0 14px 6px;
         }
 
-        .campus-info-box .info-row {
-            border-bottom: 1px solid #eee;
+        /* 8. WiFi 列表样式 */
+        .wifi-list {
+            max-height: 240px;
+            overflow-y: auto;
+            margin: 12px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .wifi-item {
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: var(--radius-md);
+            padding: 12px 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.2s;
+        }
+        .wifi-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.18);
+        }
+        .wifi-item.selected {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
+        }
+        .wifi-name {
+            font-size: 13.5px;
+            font-weight: 600;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .wifi-signal {
+            font-size: 11.5px;
+            color: var(--text-sub);
+            padding: 2px 7px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.06);
         }
 
-        .campus-info-box .info-row:last-of-type {
-            border-bottom: none;
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 9px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 13px;
+        }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: var(--text-sub); }
+        .info-value { font-weight: 600; color: #fff; }
+        .interval-input {
+            width: 70px;
+            padding: 4px 8px;
+            text-align: center;
+            background: var(--bg-input);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            color: #fff;
+            outline: none;
         }
 
-        .btn-danger {
-            background: #fee2e2;
-            color: #b91c1c;
-            margin-top: 12px;
-        }
-
-        .btn-danger:hover {
-            background: #fecaca;
-        }
-        
+        /* 底部链接 */
         .footer {
             text-align: center;
-            margin-top: 20px;
-            padding-top: 15px;
-            border-top: 1px solid #e5e7eb;
+            padding-top: 10px;
+            margin-top: auto;
         }
-        
         .github-link {
-            color: #667eea;
+            color: var(--text-muted);
             text-decoration: none;
-            font-size: 13px;
-            transition: color 0.3s;
+            font-size: 11.5px;
+            transition: color 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
         }
-        
         .github-link:hover {
-            color: #764ba2;
-            text-decoration: underline;
+            color: #a5b4fc;
         }
     </style>
 </head>
 <body>
-    <!-- 主界面 -->
+    <!-- 环境光晕背景 -->
+    <div class="ambient-glow-1"></div>
+    <div class="ambient-glow-2"></div>
+
+    <!-- 1. 主界面 -->
     <div class="container" id="mainScreen">
-        <h1>🌐 校园网助手</h1>
-        
-        <div class="status-box">
-            <div class="status-icon" id="statusIcon">⏳</div>
+        <!-- 顶栏 Header -->
+        <header class="app-header">
+            <div class="app-brand">
+                <div class="app-logo-badge">📶</div>
+                <div class="app-title-group">
+                    <h1>校园网助手 <span class="app-ver-pill">v2.0.5</span></h1>
+                </div>
+            </div>
+            <button class="header-btn" onclick="showSetup()">
+                <span>⚙️</span> 设置
+            </button>
+        </header>
+
+        <!-- 核心状态雷达环 (Hero Gauge) -->
+        <div class="glass-card gauge-card" id="gaugeCard">
+            <div class="radar-box">
+                <svg class="radar-svg" viewBox="0 0 140 140">
+                    <circle class="radar-bg-circle" cx="70" cy="70" r="54"></circle>
+                    <circle class="radar-meter-circle" id="radarMeter" cx="70" cy="70" r="54"></circle>
+                </svg>
+                <div class="radar-center-content">
+                    <div class="status-icon" id="statusIcon">⏳</div>
+                    <div class="status-pulse-dot" id="statusPulseDot"></div>
+                </div>
+            </div>
             <div class="status-text" id="statusText">正在检查网络...</div>
-            <div class="status-detail" id="statusDetail"></div>
-        </div>
-        
-        <div class="network-info" id="networkInfo">
-            <h3>📡 网络信息</h3>
-            <div class="info-row">
-                <span class="info-label">当前WiFi:</span>
-                <span class="info-value" id="currentWifi">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">配置的主网络:</span>
-                <span class="info-value" id="primaryWifi">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">配置的备用网络:</span>
-                <span class="info-value" id="backupWifi">-</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">检测间隔:</span>
-                <span class="info-value"><span id="intervalDisplay">15</span>秒</span>
+            <div class="status-detail" id="statusDetail">请稍候，正在获取状态</div>
+
+            <!-- 网络参数胶囊 -->
+            <div class="network-grid" id="networkInfo">
+                <div class="network-pill">
+                    <span class="pill-label">当前连接 WiFi</span>
+                    <span class="pill-val" id="currentWifi">-</span>
+                </div>
+                <div class="network-pill">
+                    <span class="pill-label">自愈检测周期</span>
+                    <span class="pill-val"><span id="intervalDisplay">15</span> 秒</span>
+                </div>
+                <div class="network-pill" style="display:none;">
+                    <!-- 保持原有 ID 兼容数据绑定 -->
+                    <span id="primaryWifi">-</span>
+                    <span id="backupWifi">-</span>
+                </div>
             </div>
         </div>
+
+        <!-- 学生身份名片 (Profile Card) -->
+        <div class="glass-card profile-card" id="campusInfoBox">
+            <div class="profile-left">
+                <div class="avatar-box">🎓</div>
+                <div class="profile-meta">
+                    <div class="profile-id-row">
+                        <span class="profile-id" id="campusStudentId">未配置学号</span>
+                        <span class="operator-tag" id="campusOperator">未配置</span>
+                    </div>
+                    <span class="profile-sub">校园网 Portal 认证绑定身份</span>
+                </div>
+            </div>
+            <button class="profile-edit-btn" id="changeAccountBtn" onclick="showLoginConfig(false)">
+                ✏️ 更改
+            </button>
+            <button id="clearCampusInfoBtn" onclick="clearCampusInfo()" style="display: none;"></button>
+        </div>
+
+        <!-- 智能保活与自启开关组 -->
+        <div class="toggles-group">
+            <div class="toggle-row">
+                <div class="toggle-meta">
+                    <span class="toggle-icon">🔔</span>
+                    <span class="toggle-title">自动保活与断线自愈</span>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="autoCheckToggle" onchange="toggleAutoCheck()" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+            <div class="toggle-row">
+                <div class="toggle-meta">
+                    <span class="toggle-icon">🚀</span>
+                    <span class="toggle-title">开机后台静默自启</span>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="autostartToggle" onchange="toggleAutostart()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- 快捷操作按钮 -->
         <button class="btn btn-primary" id="checkNowBtn" onclick="checkNow()">
-            🔄 立即检测网络
+            <span>🔄</span> 立即检测并重连
         </button>
 
-        <div class="toggle-container">
-            <span class="toggle-label">🔔 自动检测网络</span>
-            <label class="toggle-switch">
-                <input type="checkbox" id="autoCheckToggle" onchange="toggleAutoCheck()" checked>
-                <span class="toggle-slider"></span>
-            </label>
+        <!-- 可折叠活动时间轴 (Activity Terminal) -->
+        <div class="glass-card timeline-card" id="timelineCard">
+            <div class="timeline-header" onclick="toggleTimeline()">
+                <span class="timeline-title">
+                    <span>⚡</span> 运行动态与认证日志
+                </span>
+                <span class="timeline-arrow" id="timelineArrow">▼</span>
+            </div>
+            <div class="log-box" id="logBox"></div>
         </div>
 
-        <div class="toggle-container">
-            <span class="toggle-label">🚀 开机自启动</span>
-            <label class="toggle-switch">
-                <input type="checkbox" id="autostartToggle" onchange="toggleAutostart()">
-                <span class="toggle-slider"></span>
-            </label>
-        </div>
-
-        <button class="btn btn-secondary" onclick="showSetup()">
-            ⚙️ 设置
-        </button>
-        
-        <div class="log-box" id="logBox">
-        </div>
-        
+        <!-- 底部版权与 GitHub -->
         <div class="footer">
             <a href="#" onclick="openGithub()" class="github-link">
-                🔗 GitHub: XXGCXY-CampusNet-AutoLogin
+                <span>🔗</span> GitHub: XXGCXY-CampusNet-AutoLogin
             </a>
         </div>
     </div>
-    
-    <!-- 配置界面 -->
+
+    <!-- 2. WiFi 与偏好设置界面 -->
     <div class="container hidden" id="setupScreen">
-        <h1>⚙️ 设置</h1>
-
-        <h3 style="margin-top: 20px; color: #667eea;">📡 WiFi 网络</h3>
-        <p style="margin-bottom: 15px; color: #666;">请选择您要连接的主网络和备用网络：</p>
-
-        <div class="wifi-list" id="wifiList">
-            <div style="padding: 20px; text-align: center; color: #666;">
-                正在扫描WiFi...
+        <div class="screen-header">
+            <button class="back-btn" onclick="showMain()">←</button>
+            <div>
+                <h2 class="screen-title">⚙️ 网络设置</h2>
+                <div class="screen-sub">配置主备 WiFi 与自愈守护周期</div>
             </div>
         </div>
-        
-        <div class="info-row" style="margin-top: 20px;">
-            <span class="info-label">已选主网络:</span>
-            <span class="info-value" id="selectedPrimary">未选择</span>
-        </div>
-        <div class="info-row">
-            <span class="info-label">已选备用网络:</span>
-            <span class="info-value" id="selectedBackup">未选择</span>
-        </div>
-        
-        <div class="info-row" style="margin-top: 15px;">
-            <span class="info-label">检测间隔(秒):</span>
-            <input type="number" class="interval-input" id="intervalInput" min="5" max="300" value="15">
-        </div>
 
-        <div class="campus-info-box" id="campusInfoBox">
-            <h3>🎓 校园网信息</h3>
+        <div class="glass-card">
+            <div style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 6px;">📡 扫描周边校园网 WiFi</div>
+            <div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 10px;">点击选取主网络与备用网络：</div>
+
+            <div class="wifi-list" id="wifiList">
+                <div style="padding: 20px; text-align: center; color: var(--text-muted);">
+                    正在扫描 WiFi...
+                </div>
+            </div>
+
             <div class="info-row">
-                <span class="info-label">学号:</span>
-                <span class="info-value" id="campusStudentId">未配置</span>
+                <span class="info-label">首选主网络:</span>
+                <span class="info-value" id="selectedPrimary" style="color:#818cf8;">未选择</span>
             </div>
             <div class="info-row">
-                <span class="info-label">运营商:</span>
-                <span class="info-value" id="campusOperator">未配置</span>
+                <span class="info-label">备选网络:</span>
+                <span class="info-value" id="selectedBackup" style="color:#38bdf8;">未选择</span>
             </div>
-            <button class="btn btn-primary" id="changeAccountBtn" onclick="showLoginConfig(false)" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
-                ✏️ 更改账号信息
+            <div class="info-row">
+                <span class="info-label">守护检测间隔 (秒):</span>
+                <input type="number" class="interval-input" id="intervalInput" min="5" max="300" value="15">
+            </div>
+        </div>
+
+        <div class="glass-card" style="margin-top: 4px;">
+            <div style="font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 8px;">🎓 校园网凭据管理</div>
+            <button class="btn btn-secondary" onclick="showLoginConfig(false)" style="margin-bottom: 8px;">
+                ✏️ 更改校园网账号信息
             </button>
-            <button class="btn btn-danger" id="clearCampusInfoBtn" onclick="clearCampusInfo()">
-                🗑️ 清理校园网信息
+            <button class="btn btn-danger" onclick="clearCampusInfo()">
+                🗑️ 清理本地校园网凭据
             </button>
         </div>
 
-
-        <div class="btn-group">
+        <div class="btn-group" style="margin-top: 10px;">
             <button class="btn btn-secondary" onclick="showMain()">返回</button>
-            <button class="btn btn-primary" onclick="saveConfig()">保存配置</button>
+            <button class="btn btn-primary" onclick="saveConfig()">保存网络配置</button>
         </div>
     </div>
 
-    <!-- 登录配置界面 (v1.9.0+) -->
+    <!-- 3. 校园网账号配置界面 (v1.9.0+) -->
     <div class="container hidden" id="loginConfigScreen">
-        <h1>🎓 校园网账号配置</h1>
-        <p style="margin-bottom: 15px; color: #666;" id="loginConfigHint">
-            请填写校园网账号信息。保存后软件将自动登录。
-        </p>
-
-        <div class="form-error" id="loginConfigError"></div>
-        <div class="form-success" id="loginConfigSuccess"></div>
-
-        <div class="form-group">
-            <label class="form-label" for="loginOperator">运营商</label>
-            <select class="form-select" id="loginOperator">
-                <option value="yd">📱 中国移动 (@xxgcyd)</option>
-                <option value="lt">📡 中国联通 (@xxgclt)</option>
-                <option value="dx">📞 中国电信 (@xxgcdx)</option>
-            </select>
-        </div>
-
-        <div class="form-group">
-            <label class="form-label" for="loginStudentId">学号</label>
-            <input type="text" class="form-input" id="loginStudentId"
-                   placeholder="例如 2021110101" maxlength="20"
-                   oninput="this.value = this.value.replace(/[^\d]/g, '')">
-            <div class="form-hint">纯数字,系统会自动拼接 <code>@xxgcyd/xxgclt/xxgcdx</code> 后缀</div>
-        </div>
-
-        <div class="form-group">
-            <label class="form-label" for="loginPassword">校园网密码</label>
-            <input type="password" class="form-input" id="loginPassword"
-                   placeholder="请输入校园网登录密码" autocomplete="off">
-            <div class="form-hint">密码使用 Windows DPAPI 加密后存储,只在本机本用户可解密</div>
-        </div>
-
-        <div class="form-group">
-            <label class="form-label" for="loginBaseUrl">Portal URL <span style="color:#888; font-weight:normal;">(必填)</span></label>
-            <div class="form-row">
-                <input type="text" class="form-input" id="loginBaseUrl"
-                       placeholder="http://172.18.x.x:6060/portal.do"
-                       onpaste="setTimeout(parsePortalUrl, 100)">
-                <button type="button" class="btn-parse" onclick="parsePortalUrl()">解析</button>
-            </div>
-            <div class="form-hint">
-                连接校园网 WiFi 后,浏览器访问任意网站,复制地址栏完整 URL 粘贴到此处(粘贴后自动解析),也可点「解析」手动提取字段
+        <div class="screen-header">
+            <button class="back-btn" onclick="cancelLoginConfig()">←</button>
+            <div>
+                <h2 class="screen-title">🎓 校园网凭据配置</h2>
+                <div class="screen-sub" id="loginConfigHint">填写校园网账号，软件将提供全天候自动认证。</div>
             </div>
         </div>
 
-        <div class="advanced-toggle" id="advancedToggle" onclick="toggleAdvanced()">
-            ▶ 高级字段(SSID / AC 名称 / VLAN 等)
-        </div>
-        <div class="advanced-content hidden" id="advancedContent">
+        <div class="glass-card">
+            <div class="form-error" id="loginConfigError"></div>
+            <div class="form-success" id="loginConfigSuccess"></div>
+
             <div class="form-group">
-                <label class="form-label" for="loginWlanAcName">AC 名称 (wlanacname)</label>
-                <input type="text" class="form-input" id="loginWlanAcName" placeholder="例如 XXGC-AC-01">
+                <label class="form-label" for="loginOperator">运营商服务商</label>
+                <select class="form-select" id="loginOperator">
+                    <option value="yd">📱 中国移动 (@xxgcyd)</option>
+                    <option value="lt">📡 中国联通 (@xxgclt)</option>
+                    <option value="dx">📞 中国电信 (@xxgcdx)</option>
+                </select>
             </div>
+
             <div class="form-group">
-                <label class="form-label" for="loginWlanAcIp">AC IP (wlanacIp)</label>
-                <input type="text" class="form-input" id="loginWlanAcIp" placeholder="例如 172.***.***.***">
+                <label class="form-label" for="loginStudentId">学生学号</label>
+                <input type="text" class="form-input" id="loginStudentId"
+                       placeholder="例如 2021110101" maxlength="20"
+                       oninput="this.value = this.value.replace(/[^\d]/g, '')">
+                <div class="form-hint">纯数字，系统认证时自动拼接对应运营商后缀</div>
             </div>
+
             <div class="form-group">
-                <label class="form-label" for="loginVlan">VLAN ID</label>
-                <input type="text" class="form-input" id="loginVlan" placeholder="例如 1050">
+                <label class="form-label" for="loginPassword">校园网登录密码</label>
+                <input type="password" class="form-input" id="loginPassword"
+                       placeholder="请输入校园网认证密码" autocomplete="off">
+                <div class="form-hint">🔒 密码使用 Windows DPAPI 本机硬件密钥加密存储</div>
             </div>
+
             <div class="form-group">
-                <label class="form-label" for="loginMacAddress">MAC 地址 (留空自动获取)</label>
-                <input type="text" class="form-input" id="loginMacAddress" placeholder="aa:bb:cc:dd:ee:ff">
+                <label class="form-label" for="loginBaseUrl">Portal 认证地址 <span style="color:var(--text-muted); font-weight:normal;">(必填)</span></label>
+                <div class="form-row">
+                    <input type="text" class="form-input" id="loginBaseUrl"
+                           placeholder="http://172.18.252.12:6060/portal.do"
+                           onpaste="setTimeout(parsePortalUrl, 100)">
+                    <button type="button" class="btn-parse" onclick="parsePortalUrl()">自动提纯</button>
+                </div>
+                <div class="form-hint">
+                    连上 WiFi 后打开浏览器，直接粘贴跳转页完整 URL，软件将<b>自动提取 AC 参数并剥离多余参数</b>。
+                </div>
             </div>
-            <div class="form-group">
-                <label class="form-label" for="loginHostname">主机名 (留空使用本机名)</label>
-                <input type="text" class="form-input" id="loginHostname" placeholder="">
+
+            <div class="advanced-toggle" id="advancedToggle" onclick="toggleAdvanced()">
+                ▶ 高级网络参数 (AC 名称 / VLAN / IP / MAC)
+            </div>
+            <div class="advanced-content hidden" id="advancedContent">
+                <div class="form-group">
+                    <label class="form-label" for="loginWlanAcName">AC 名称 (wlanacname)</label>
+                    <input type="text" class="form-input" id="loginWlanAcName" placeholder="例如 AuteWifi-XXGC">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="loginWlanAcIp">AC IP (wlanacIp)</label>
+                    <input type="text" class="form-input" id="loginWlanAcIp" placeholder="例如 172.18.252.12">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="loginVlan">VLAN ID</label>
+                    <input type="text" class="form-input" id="loginVlan" placeholder="例如 31002201">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="loginMacAddress">网卡物理 MAC (留空自动抓取)</label>
+                    <input type="text" class="form-input" id="loginMacAddress" placeholder="aa:bb:cc:dd:ee:ff">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="loginHostname">设备主机名 (留空使用本机名称)</label>
+                    <input type="text" class="form-input" id="loginHostname" placeholder="">
+                </div>
             </div>
         </div>
 
-        <div class="btn-group" style="margin-top: 24px;">
-            <button class="btn btn-secondary" id="loginConfigCancelBtn" onclick="cancelLoginConfig()">取消</button>
-            <button class="btn btn-primary" onclick="saveLoginProfile(false)">💾 保存</button>
-            <button class="btn btn-primary" onclick="saveLoginProfile(true)" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">🚀 保存并登录</button>
+        <div class="btn-group" style="margin-top: 14px;">
+            <button class="btn btn-secondary" id="loginConfigCancelBtn" onclick="cancelLoginConfig()">稍后</button>
+            <button class="btn btn-secondary" onclick="saveLoginProfile(false)">💾 仅保存</button>
+            <button class="btn btn-success" onclick="saveLoginProfile(true)">🚀 保存并登录</button>
         </div>
     </div>
 
@@ -650,6 +1112,7 @@
         window.onload = async () => {
             addLog('程序已启动');
             await loadConfig();
+            await loadCampusNetInfo();
             // 检查是否首次启动,未配置校园网账号则强制弹窗
             await checkFirstRun();
             // 从后端获取检测开关状态
@@ -669,6 +1132,11 @@
             // 监听托盘菜单事件
             await listen('check_network', async () => {
                 addLog('托盘菜单触发：立即检测');
+                const gauge = document.getElementById('gaugeCard');
+                if (gauge) {
+                    gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected');
+                    gauge.classList.add('state-checking');
+                }
                 document.getElementById('statusIcon').textContent = '⏳';
                 document.getElementById('statusText').textContent = '检测中...';
                 await checkNetwork();
@@ -821,28 +1289,36 @@
         
         // 更新状态显示
         function updateStatus(status) {
+            const gauge = document.getElementById('gaugeCard');
             const icon = document.getElementById('statusIcon');
             const text = document.getElementById('statusText');
             const detail = document.getElementById('statusDetail');
             const currentWifi = document.getElementById('currentWifi');
             
-            currentWifi.textContent = status.wifi_connected || '未连接';
+            currentWifi.textContent = status.wifi_connected || '未连接 WiFi';
             
+            if (gauge) {
+                gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected', 'state-checking');
+            }
+
             if (status.internet_ok) {
-                icon.textContent = '✅';
-                text.textContent = '网络正常';
-                text.className = 'status-text connected';
-                detail.textContent = '已连接互联网';
+                if (gauge) gauge.classList.add('state-connected');
+                icon.textContent = '✓';
+                text.textContent = '网络已认证连接';
+                text.className = 'status-text';
+                detail.textContent = '校园网畅通 · 全天候自动保活守护中';
             } else if (status.wifi_connected) {
+                if (gauge) gauge.classList.add('state-needs-login');
                 icon.textContent = '🔐';
-                text.textContent = '需要登录';
-                text.className = 'status-text disconnected';
-                detail.textContent = 'WiFi已连接，需要校园网认证';
+                text.textContent = '需要 Portal 认证';
+                text.className = 'status-text';
+                detail.textContent = `已连接「${status.wifi_connected}」，待校园网 Web 认证`;
             } else {
-                icon.textContent = '❌';
-                text.textContent = '网络断开';
-                text.className = 'status-text disconnected';
-                detail.textContent = 'WiFi未连接';
+                if (gauge) gauge.classList.add('state-disconnected');
+                icon.textContent = '⚡';
+                text.textContent = 'WiFi 网络已断开';
+                text.className = 'status-text';
+                detail.textContent = '未检测到可用校园网连接';
             }
         }
         
@@ -1062,9 +1538,14 @@
         // 立即检测
         async function checkNow() {
             addLog('正在检测网络...');
-            // 先快速更新状态
+            const gauge = document.getElementById('gaugeCard');
+            if (gauge) {
+                gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected');
+                gauge.classList.add('state-checking');
+            }
             document.getElementById('statusIcon').textContent = '⏳';
-            document.getElementById('statusText').textContent = '检测中...';
+            document.getElementById('statusText').textContent = '正在探测网络...';
+            document.getElementById('statusDetail').textContent = '正在检测网关与外网连通状态';
             await checkNetwork();
         }
         window.checkNow = checkNow;
@@ -1100,11 +1581,17 @@
                 const idEl = document.getElementById('campusStudentId');
                 const opEl = document.getElementById('campusOperator');
                 if (info && info.configured) {
-                    idEl.textContent = info.student_id || '未配置';
-                    opEl.textContent = info.operator || '未配置';
+                    idEl.textContent = info.student_id || '已配置账号';
+                    const opText = info.operator || '校园网';
+                    opEl.textContent = opText;
+                    opEl.className = 'operator-tag';
+                    if (opText.includes('移动') || info.operator_code === 'yd') opEl.classList.add('yd');
+                    else if (opText.includes('联通') || info.operator_code === 'lt') opEl.classList.add('lt');
+                    else if (opText.includes('电信') || info.operator_code === 'dx') opEl.classList.add('dx');
                 } else {
-                    idEl.textContent = '未配置';
-                    opEl.textContent = '未配置';
+                    idEl.textContent = '未配置学号';
+                    opEl.textContent = '点击配置';
+                    opEl.className = 'operator-tag';
                 }
             } catch (e) {
                 addLog('加载校园网信息失败: ' + e);
@@ -1562,11 +2049,18 @@
         }
         window.saveConfig = saveConfig;
         
-        // 添加日志
-        // 用 textContent 不用 innerHTML 避免 XSS (PS 输出含 < > & 字符时不会被解析)
+        // 折叠/展开活动动态
+        function toggleTimeline() {
+            const card = document.getElementById('timelineCard');
+            if (card) {
+                card.classList.toggle('collapsed');
+            }
+        }
+        window.toggleTimeline = toggleTimeline;
+
+        // 添加日志 (带极客高亮与安全 textContent)
         function addLog(message) {
             if (message === null || message === undefined) return;
-            // 多行 message 按 \r?\n 拆成多条, 过滤掉纯空行
             const lines = String(message).split(/\r?\n/);
             lines.forEach(line => {
                 const trimmed = line.trim();
@@ -1575,6 +2069,7 @@
                     return;
                 }
                 const logBox = document.getElementById('logBox');
+                if (!logBox) return;
                 const now = new Date();
                 const time = now.toTimeString().split(' ')[0];
 
@@ -1586,6 +2081,16 @@
                 timeSpan.textContent = `[${time}]`;
 
                 const msgSpan = document.createElement('span');
+                msgSpan.className = 'log-msg';
+                if (/成功|正常|已连接|✓|\[\+\]/i.test(trimmed)) {
+                    msgSpan.classList.add('log-success');
+                } else if (/失败|错误|异常|无法|\[!\]/i.test(trimmed)) {
+                    msgSpan.classList.add('log-error');
+                } else if (/警告|超时|⚠️/i.test(trimmed)) {
+                    msgSpan.classList.add('log-warn');
+                } else if (/步骤|正在|检测/i.test(trimmed)) {
+                    msgSpan.classList.add('log-step');
+                }
                 msgSpan.textContent = ' ' + trimmed;
 
                 entry.appendChild(timeSpan);
@@ -1595,10 +2100,12 @@
                 logBox.scrollTop = logBox.scrollHeight;
             });
 
-            // 保留最近50条日志
+            // 保留最近60条日志
             const logBox = document.getElementById('logBox');
-            while (logBox.children.length > 50) {
-                logBox.removeChild(logBox.firstChild);
+            if (logBox) {
+                while (logBox.children.length > 60) {
+                    logBox.removeChild(logBox.firstChild);
+                }
             }
         }
 
