@@ -930,6 +930,19 @@
                     <span class="toggle-slider"></span>
                 </label>
             </div>
+            <div class="toggle-row">
+                <div class="toggle-meta">
+                    <span class="toggle-icon">🔥</span>
+                    <div>
+                        <div class="toggle-title">保持移动热点开启</div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">防无设备自动关闭 · 持续共享校园网</div>
+                    </div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="hotspotKeepaliveToggle" onchange="toggleHotspotKeepalive()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
         </div>
 
         <!-- 快捷操作按钮 -->
@@ -1104,6 +1117,7 @@
         let selectedPrimary = '';
         let selectedBackup = '';
         let autoCheckEnabled = true;
+        let hotspotKeepaliveEnabled = false;
         let checkIntervalId = null;
         let isLoggingIn = false;  // 防止重复登录
         let lastLoginTime = 0;    // 上次登录时间
@@ -1128,6 +1142,13 @@
                 document.getElementById('autostartToggle').checked = autostartEnabled;
             } catch (e) {
                 console.log('获取自启动状态失败');
+            }
+            // 获取保持移动热点常开状态
+            try {
+                hotspotKeepaliveEnabled = await invoke('get_hotspot_keepalive');
+                document.getElementById('hotspotKeepaliveToggle').checked = hotspotKeepaliveEnabled;
+            } catch (e) {
+                console.log('获取移动热点保活状态失败');
             }
             // 监听托盘菜单事件
             await listen('check_network', async () => {
@@ -1200,6 +1221,30 @@
             }
         }
         window.toggleAutostart = toggleAutostart;
+
+        // 切换保持移动热点常开
+        async function toggleHotspotKeepalive() {
+            try {
+                const checkbox = document.getElementById('hotspotKeepaliveToggle');
+                const enabled = checkbox.checked;
+                hotspotKeepaliveEnabled = await invoke('set_hotspot_keepalive', { enabled: enabled });
+                checkbox.checked = hotspotKeepaliveEnabled;
+                addLog(hotspotKeepaliveEnabled ? '[+] 已开启保持移动热点开启（自动防休眠拉起）' : '[-] 已关闭保持移动热点开启');
+                if (hotspotKeepaliveEnabled) {
+                    addLog('正在检查并激活 Windows 移动热点...');
+                    const res = await invoke('check_and_keep_hotspot_alive');
+                    if (res && res.includes('STARTED:Success')) {
+                        addLog('[+] 移动热点已激活拉起开启');
+                    } else if (res && res.includes('ACTIVE:On')) {
+                        addLog('[+] 移动热点当前已处于开启就绪状态');
+                    }
+                }
+            } catch (e) {
+                addLog('设置移动热点保活失败: ' + e);
+                document.getElementById('hotspotKeepaliveToggle').checked = !document.getElementById('hotspotKeepaliveToggle').checked;
+            }
+        }
+        window.toggleHotspotKeepalive = toggleHotspotKeepalive;
         
         // 加载配置
         async function loadConfig() {
@@ -1239,9 +1284,17 @@
                 const status = await invoke('check_network');
                 updateStatus(status);
                 
-                // 如果网络正常，重置登录状态
+                // 如果网络正常，重置登录状态并执行移动热点守护
                 if (status.internet_ok) {
                     isLoggingIn = false;
+                    if (hotspotKeepaliveEnabled) {
+                        try {
+                            const res = await invoke('check_and_keep_hotspot_alive');
+                            if (res && res.includes('STARTED:Success')) {
+                                addLog('[+] 移动热点守护：检测到热点已关闭，已自动重新拉起');
+                            }
+                        } catch (e) {}
+                    }
                     return;
                 }
                 
@@ -1254,6 +1307,14 @@
                     updateStatus(retryStatus);
                     if (retryStatus.internet_ok) {
                         addLog('重连后网络已恢复正常');
+                        if (hotspotKeepaliveEnabled) {
+                            try {
+                                const res = await invoke('check_and_keep_hotspot_alive');
+                                if (res && res.includes('STARTED:Success')) {
+                                    addLog('[+] 移动热点守护：已重新激活热点');
+                                }
+                            } catch (e) {}
+                        }
                         return;
                     }
                     if (retryStatus.needs_login) {

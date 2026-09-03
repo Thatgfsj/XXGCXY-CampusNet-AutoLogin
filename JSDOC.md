@@ -1169,4 +1169,12 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 #### 2. IPC 接口与业务契约 100% 零侵入兼容
 重构过程中严格保留了所有 DOM 元素 ID 与事件调用契约，底层 Rust Tauri IPC 与后台静默守护逻辑完全无缝运转。
 
+#### 3. 移动热点常开守护 (Hotspot Keep-Alive)
+- **痛点与背景**：在校园网 1 人 1 账号限制场景下，学生通常通过电脑连接认证后开启 Windows 移动热点供手机/平板使用。然而 Windows 机制默认在几分钟无活跃设备或网络重连时自动关闭移动热点。
+- **技术实现**：利用 Windows 原生 WinRT `Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager` 投影，实现：
+  - `get_hotspot_keepalive` / `set_hotspot_keepalive`: 开关状态持久化保存于 `config.json`；
+  - `check_and_keep_hotspot_alive`: 实时获取 `TetheringOperationalState`，若处于 `Off` 则异步调用 `StartTetheringAsync()` 唤醒开启；
+  - 联动心跳守护：在网络连通时自动检查热点状态并自动复苏。
+
+
 

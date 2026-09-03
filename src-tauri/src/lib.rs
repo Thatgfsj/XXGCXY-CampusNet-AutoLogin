@@ -74,6 +74,8 @@ pub struct Config {
     pub primary_ssid: String,
     pub backup_ssid: String,
     pub check_interval: u64,
+    #[serde(default)]
+    pub hotspot_keepalive: bool,
 }
 
 impl Default for Config {
@@ -82,6 +84,7 @@ impl Default for Config {
             primary_ssid: String::new(),
             backup_ssid: String::new(),
             check_interval: 15,
+            hotspot_keepalive: false,
         }
     }
 }
@@ -707,6 +710,80 @@ fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
             let _ = fs::remove_file(&desktop_path);
         }
         Ok(())
+    }
+}
+
+// ============= 保持移动热点常开 (Hotspot Keep-Alive) =============
+
+#[tauri::command]
+fn get_hotspot_keepalive(state: tauri::State<'_, AppState>) -> bool {
+    let config = state.config.lock().unwrap_or_else(|e| e.into_inner());
+    config.hotspot_keepalive
+}
+
+#[tauri::command]
+async fn set_hotspot_keepalive(enabled: bool, state: tauri::State<'_, AppState>) -> Result<bool, String> {
+    {
+        let mut config = state.config.lock().unwrap_or_else(|e| e.into_inner());
+        config.hotspot_keepalive = enabled;
+        let config_path = get_config_path();
+        if let Ok(content) = serde_json::to_string_pretty(&*config) {
+            let _ = fs::write(&config_path, content);
+        }
+    }
+    if enabled {
+        let _ = check_and_keep_hotspot_alive().await;
+    }
+    Ok(enabled)
+}
+
+#[tauri::command]
+async fn check_and_keep_hotspot_alive() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let script = r#"
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$asTaskGeneric = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }
+function AwaitAction($WinRtTask, $ResultType) {
+    $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
+    $netTask = $asTask.Invoke($null, @($WinRtTask))
+    $netTask.Wait(8000) | Out-Null
+    return $netTask.Result
+}
+try {
+    [Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType=WindowsRuntime] | Out-Null
+    [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime] | Out-Null
+    $profile = [Windows.Networking.Connectivity.NetworkInformation]::GetInternetConnectionProfile()
+    if ($null -eq $profile) {
+        $profiles = [Windows.Networking.Connectivity.NetworkInformation]::GetConnectionProfiles()
+        if ($profiles.Count -gt 0) { $profile = $profiles[0] }
+    }
+    if ($null -ne $profile) {
+        $manager = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::CreateFromConnectionProfile($profile)
+        $state = $manager.TetheringOperationalState.ToString()
+        if ($state -eq 'Off') {
+            $res = AwaitAction ($manager.StartTetheringAsync()) ([Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult])
+            Write-Output "STARTED:$($res.Status)"
+        } else {
+            Write-Output "ACTIVE:$state"
+        }
+    } else {
+        Write-Output "NO_PROFILE"
+    }
+} catch {
+    Write-Output "ERR:$($_.Exception.Message)"
+}
+"#;
+        let output = hidden_command("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
+            .output()
+            .map_err(|e| format!("调用移动热点保活失败: {}", e))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(stdout)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok("UNSUPPORTED_PLATFORM".to_string())
     }
 }
 
@@ -1455,6 +1532,10 @@ pub fn run() {
             open_github,
             load_campus_net_info,
             clear_campus_net_info,
+            // ===== 移动热点保活 =====
+            get_hotspot_keepalive,
+            set_hotspot_keepalive,
+            check_and_keep_hotspot_alive,
             // ===== 登录模块 (v1.9.0+) =====
             is_login_configured,
             get_login_profile,
