@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.0.2 |
+| **当前版本** | 2.0.5 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -1095,11 +1095,63 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 
 **版本号策略**:按用户规则"它发布了多少你就更新多少",每次用户认可的 commit 都 bump 一个小版本(1.8.1 → 1.8.2 → 1.8.3)。尚未涉及 minor / major bump,需要时另议。
 
-### 12.6 已知遗留 / 待办
+### 12.6 遗留项状态更新
 
-- [ ] 桌面端运行 `xywdl.bat` 后,如果用户从未配置过,会进入交互模式(Read-Host)。当前 Rust 端 `run_login_script` 总是带 `--non-interactive`,如果脚本走非交互 + 已有 config 路径,正常;如果走非交互但自动检测参数失败(无 redirect URL 又无 config),脚本会直接 `exit 1`,Rust 端拿到非零退出码会"登录失败"。这种情况下用户需要 **先手动跑一次 `xywdl.bat` 完成首次配置**,桌面端再接管。后续可在桌面端加"首次配置引导"功能。
-- [ ] GitHub Actions 提示:Node 20 actions 即将在 2026-09 被移除,需要升级到 Node 24 versions(影响 `actions/checkout@v4` / `actions/setup-node@v4` / `actions/upload-artifact@v4` / `softprops/action-gh-release@v1`)。目前未影响功能,后续要升级。
-- [ ] `windows-latest` runner 将于 2026-06-15 重定向到 `windows-2025-vs2026`,可能需要适配新版 Visual Studio。
-- [ ] 校园网信息显示目前是只读 + 一键清理,**没有"编辑"入口**。如果用户换了学号或运营商,只能重新跑登录脚本,UI 上无法直接改。这个看用户后续需求决定要不要做。
+- [x] **首次配置引导功能**已在 v1.9.0+ 落地（未配置时自动弹出 `#loginConfigScreen`）。
+- [x] **账号修改入口**已在 v1.9.0+ 落地（设置页提供“更改账号信息”完整编辑模态框）。
+
+---
+
+### 12.7 v2.0.4 与 v2.0.5 重大健壮性加固与故障排除史
+
+#### 1. 现象 1：前端控制台与 UI 出现莫名其妙的带时间戳空白行
+- **故障特征**：每次执行登录，前端日志框会大量出现 `[HH:mm:ss]` 空白条目。
+- **根因分析**：
+  1. `index.html` 的 `addLog(message)` 仅使用 `String(message).split('\n')` 切分。
+  2. Windows 下换行符为 `\r\n`，切分后残留 `\r`，且脚本/批处理中的段落格式空行（`Write-Host ""` 或 `echo.`）被切成空白字符串 `""`。
+  3. `addLog` 无任何非空检查，无条件创建带时间戳的 DOM 节点插入日志流。
+- **解决方案**：
+  - 前端：使用 `/\r?\n/` 切分，`line.trim() === ''` 时直接过滤丢弃。
+  - 后端：在 `src-tauri/src/lib.rs` 的 `run_login_script` 中增加 `clean_script_output` 函数，将连续空行合并折叠。
+  - 启动器：`xywdl.bat` 在非交互模式（桌面调用）下收敛冗余换行。
+
+#### 2. 现象 2：粘贴带参数重定向 URL 导致双问号 `??`、账号密码丢失、AC 报错“设备不在正常状态”
+- **故障特征**：用户粘贴浏览器重定向的长 URL（包含 `?wlanuserip=...&url=...`）后，脚本拼装出的请求中缺少 `userid` 和 `passwd`，服务端返回 `{"code":"1","message":"设备不在正常状态,无法认证上网,请稍后"}`。
+- **根因分析**：
+  1. 前端 `parsePortalUrl` 和 `saveLoginProfile` 使用了 `setIfEmpty`，当输入框已有用户粘贴的长 URL 时，**净化后的 BaseURL 未能覆盖输入框**，存盘的仍然是含长参数的 URL。
+  2. PowerShell 脚本执行 `$authUrl = $profile.base_url -replace '/\w+\.do', '/quickauth.do'` 得到带 `?` 的地址，后面紧接着直接拼接 `?` + `$queryParams`，导致请求 URL 中出现两个问号 `??`。
+  3. AC 网关将第二个问号及后面的 `userid` 和 `passwd` 全部误当作上一个参数（如 `url`）的值，网关因未收到学号密码而报错。
+- **解决方案（四重防御体系）**：
+  1. **前端输入框**：支持 `onpaste` 粘贴后 100ms 自动提纯并回填；解析与保存时强行截断 `?` 与 `#`。
+  2. **Rust 后端**：在 `save_login_profile` 落盘前强行截断 `base_url` 参数，确保存盘 profile 纯净。
+  3. **PowerShell 核心**：在步骤 3 构造 URL 时显式 `$cleanBase = $profile.base_url.Split('?')[0].Split('#')[0].Trim()`，杜绝双问号。
+  4. **Linux Shell 核心**：`xywdl.sh` 同样加入 `cut -d'?' -f1 | cut -d'#' -f1` 剥离。
+
+#### 3. 现象 3：真实服务端返回带引号 code 导致正则失灵、误判“未知错误 99”
+- **故障特征**：AC 返回 `{"code":"1","message":"设备不在正常状态,无法认证上网,请稍后"}`，脚本却判为 `[!] 认证结果未知`、`错误码: 99`。
+- **根因分析**：
+  - 校园网 AC 返回的 JSON 中，`code` 字段是带双引号的字符串 `"code":"1"`，而脚本原有正则只能匹配裸数字 `'"code"\s*:\s*1(?!\d)'`，导致正则匹配失败直接掉入 `else` 分支。
+- **解决方案**：
+  - 步骤 5 改用 `ConvertFrom-Json`（Linux 端用 python3 json）优先反序列化，统一转换为字符串比较。
+  - 正则兜底提取同时支持带双引号和无引号形式。
+  - 服务端返回非 0 响应时，直接提取真实 `message` 透传展示给用户（如“设备不在正常状态”或“账号不存在”），不再粗暴报为未知错误 99。
+
+#### 4. 现象 4：PowerShell 5.1 解析无 BOM UTF-8 源码中文字符截断
+- **故障特征**：在 Win10/Win7 纯净环境下使用系统自带 PowerShell 5.1 时，脚本报 `switch 语句缺少块`、`一元运算符缺少操作数`。
+- **根因分析**：
+  - Windows PowerShell 5.1 默认按系统 ANSI 代码页解析 `.ps1` 文件。若脚本为无 BOM 的 UTF-8，中文字符的第二个字节会被误吞噬，吃掉后面的双引号或花括号。
+- **解决方案**：
+  - 强制为 `xywdl.ps1` 写入 UTF-8 BOM（`0xEF 0xBB 0xBF`），保证 Windows 5.1 解析引擎正确识别。
+
+#### 5. 自动化测试套件扩展
+- `tests/mock_portal.py` 增加真实 AC 响应模板（双引号 code、真实 message 字段）。
+- `tests/run_ps1_tests.ps1` 测试用例从 23 项扩展至 **30 项**，覆盖：
+  - A 组：8 项返回码与边界判断
+  - B 组：5 项配置损坏与容灾判断
+  - C 组：5 项特殊字符与 URL 编码判断
+  - D 组：1 项密码脱敏安全判断
+  - E 组：1 项连续 5 次稳定性判断
+  - F 组：新增 10 项针对脏 BaseURL 清洗、防双问号独立参数解析、带引号真实 AC 错误响应提取等高阶健壮性测试。
+  - **测试结果**：30 项全量通过（PASS: 30, FAIL: 0）。
 
 
