@@ -3,7 +3,9 @@
 新乡工程学院校园网自动登录助手 —— 基于 Tauri 2.x 的 Windows / Linux 桌面应用，自动检测 / 重连校园网 WiFi 并完成 Portal 认证登录。
 
 > 校园网认证机制详解讲解（感兴趣的话推荐查看）：[AUTH_MECHANISM.md](./AUTH_MECHANISM.md)
+> 
 > 脚本前身：https://github.com/Thatgfsj/XXGC-CampusNet-AutoLogin
+> 
 > 开发者文档（API、架构、问题修复史）：[JSDOC.md](./JSDOC.md)
 
 ## 技术栈
