@@ -672,8 +672,8 @@ fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
                 .map_err(|e| format!("获取程序路径失败: {}", e))?
                 .to_string_lossy()
                 .to_string();
-            // 路径含空格时必须加引号, 否则 Windows 解析注册表 Run 项时会按空格切断
-            let reg_value = format!("\"{}\"", exe_path);
+            // 路径含空格时必须加引号, 并且追加 --autostart 参数以便开机启动时静默保持托盘运行
+            let reg_value = format!("\"{}\" --autostart", exe_path);
             key.set_value("CampusWifiHelper", &reg_value)
                 .map_err(|e| format!("写入注册表失败: {}", e))?;
         } else {
@@ -695,7 +695,7 @@ fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
                 .to_string_lossy()
                 .to_string();
             let desktop_content = format!(
-                "[Desktop Entry]\nType=Application\nName=xxgcxy-wifi\nExec={}\nHidden=false\nX-GNOME-Autostart-enabled=true\n",
+                "[Desktop Entry]\nType=Application\nName=xxgcxy-wifi\nExec={} --autostart\nHidden=false\nX-GNOME-Autostart-enabled=true\n",
                 exe_path
             );
             fs::write(&desktop_path, desktop_content)
@@ -1498,17 +1498,22 @@ pub fn run() {
                 });
             }
 
-            // 启动窗口行为 (用户优先级要求): 有登录信息 → 隐藏到托盘; 没登录信息 → 显示
-            // 用 is_login_configured 检查 (login_profile.json + login_credential.bin 同时存在)
-            // 不再用 config.primary_ssid — v1.9.0 拆分 WiFi 配置和登录账号, WiFi 配了不等于登录账号配了
+            // 启动窗口行为:
+            // 1. 开机自启动 (--autostart / --minimized / --silent): 绝对静默隐藏于托盘, 绝不弹窗
+            // 2. 用户双击手动启动: 显示窗口并聚焦, 方便查看网络状态或配置账号
+            let args: Vec<String> = std::env::args().collect();
+            let is_autostart = args.iter().any(|arg| {
+                arg == "--autostart" || arg == "--minimized" || arg == "--silent" || arg == "-s"
+            });
             let login_configured = is_login_configured();
-            let should_hide = login_configured;
+
             if let Some(window) = app.get_webview_window("main") {
-                if should_hide {
+                if is_autostart {
                     let _ = window.hide();
+                } else {
+                    let _ = window.show();
+                    let _ = window.set_focus();
                 }
-                // 不 hide: 窗口默认显示, 前端 checkFirstRun 会检测未配置状态
-                // 然后 setTimeout 500ms 后弹登录配置屏提示用户填写
             }
 
             Ok(())

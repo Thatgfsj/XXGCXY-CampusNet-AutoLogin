@@ -896,7 +896,7 @@
                 <div class="avatar-box">🎓</div>
                 <div class="profile-meta">
                     <div class="profile-id-row">
-                        <span class="profile-id" id="campusStudentId">未配置学号</span>
+                        <span class="profile-id" id="campusStudentId">未配置账号</span>
                         <span class="operator-tag" id="campusOperator">未配置</span>
                     </div>
                     <span class="profile-sub">校园网 Portal 认证绑定身份</span>
@@ -1043,11 +1043,11 @@
             </div>
 
             <div class="form-group">
-                <label class="form-label" for="loginStudentId">学生学号</label>
+                <label class="form-label" for="loginStudentId">学生账号 / 学号</label>
                 <input type="text" class="form-input" id="loginStudentId"
-                       placeholder="例如 2024010101" maxlength="20"
-                       oninput="this.value = this.value.replace(/[^\d]/g, '')">
-                <div class="form-hint">纯数字，系统认证时自动拼接对应运营商后缀</div>
+                       placeholder="例如 2024010101 或 2024010101ls" maxlength="32"
+                       oninput="this.value = this.value.replace(/[@\s]/g, '')">
+                <div class="form-hint">支持纯数字或带字母后缀/前缀（如补卡后缀 ls/lls），系统认证时自动拼接对应运营商后缀</div>
             </div>
 
             <div class="form-group">
@@ -1845,17 +1845,22 @@
             okEl.style.display = 'none';
 
             const operator = document.getElementById('loginOperator').value;
-            const studentId = document.getElementById('loginStudentId').value.trim();
+            let studentId = document.getElementById('loginStudentId').value.trim();
+            // 如果用户误填了含 @ 后缀的完整账号，自动剥离运营商后缀
+            if (studentId.includes('@')) {
+                studentId = studentId.split('@')[0].trim();
+                document.getElementById('loginStudentId').value = studentId;
+            }
             const password = document.getElementById('loginPassword').value;
             const rawBaseUrl = document.getElementById('loginBaseUrl').value.trim();
 
             if (!studentId) {
-                errEl.textContent = '请输入学号';
+                errEl.textContent = '请输入学生账号或学号';
                 errEl.style.display = 'block';
                 return;
             }
-            if (!/^\d+$/.test(studentId)) {
-                errEl.textContent = '学号必须是纯数字';
+            if (!/^[a-zA-Z0-9_\-\.]+$/.test(studentId)) {
+                errEl.textContent = '账号格式不正确 (仅支持字母、数字、下划线及点号)';
                 errEl.style.display = 'block';
                 return;
             }
