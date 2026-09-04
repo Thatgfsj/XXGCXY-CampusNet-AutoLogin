@@ -246,11 +246,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.7
-          name: v2.0.7 - 校园网自动登录助手
+          tag_name: v2.0.8
+          name: v2.0.8 - 校园网自动登录助手
           make_latest: true
           body: |
-            v2.0.7 - 校园网自动登录助手
+            v2.0.8 - 校园网自动登录助手
 
             ## 系统要求
 
@@ -261,18 +261,18 @@ jobs:
             ## 下载
 
             **Windows (系统 PowerShell 5.1+, 体积小)**
-            - `xxgcxy-wifi_2.0.7_x64-setup.exe` - NSIS installer (~5 MB)
-            - `xxgcxy-wifi_2.0.7_x64_zh-CN.msi` - MSI installer (~6 MB)
+            - `xxgcxy-wifi_2.0.8_x64-setup.exe` - NSIS installer (~5 MB)
+            - `xxgcxy-wifi_2.0.8_x64_zh-CN.msi` - MSI installer (~6 MB)
 
             **Linux**
-            - `xxgcxy-wifi_2.0.7_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v2.0.7-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-2.0.7-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_2.0.8_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v2.0.8-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-2.0.8-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs curl or python3)
 
-            ## What's New in v2.0.7
+            ## What's New in v2.0.8
 
             ### 🔥 保持移动热点开启守护 (Hotspot Keep-Alive)
             - **突破校园网单账号限制**: 针对校园网单设备在线限制，学生使用电脑开启热点共享上网时，解决 Windows 默认因无设备连接而自动休眠关闭热点的痛点。
@@ -302,7 +302,7 @@ jobs:
             ## 升级说明
 
             从旧版本升级：
-            1. 直接下载安装最新的 v2.0.7 安装包覆盖安装即可
+            1. 直接下载安装最新的 v2.0.8 安装包覆盖安装即可
             2. 现有账号与 WiFi 配置自动保留
             3. 若之前遇到“设备不在正常状态”或“未知错误 99”，升级后即可正常通过认证并在界面显示清晰提示
             3. 若之前因 MAC/SSID 留空无法登录, 升级后即可正常登录
