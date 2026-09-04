@@ -9,6 +9,9 @@ on:
 permissions:
   contents: write
 
+env:
+  NODE_OPTIONS: "--no-deprecation"
+
 jobs:
   # ============================================
   # Windows (依赖系统 PowerShell 5.1+, 不再内置 PS7)
@@ -243,10 +246,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.6
-          name: v2.0.6 - 校园网自动登录助手
+          tag_name: v2.0.7
+          name: v2.0.7 - 校园网自动登录助手
+          make_latest: true
           body: |
-            v2.0.6 - 校园网自动登录助手
+            v2.0.7 - 校园网自动登录助手
 
             ## 系统要求
 
@@ -257,29 +261,30 @@ jobs:
             ## 下载
 
             **Windows (系统 PowerShell 5.1+, 体积小)**
-            - `xxgcxy-wifi_2.0.6_x64-setup.exe` - NSIS installer (~5 MB)
-            - `xxgcxy-wifi_2.0.6_x64_zh-CN.msi` - MSI installer (~6 MB)
+            - `xxgcxy-wifi_2.0.7_x64-setup.exe` - NSIS installer (~5 MB)
+            - `xxgcxy-wifi_2.0.7_x64_zh-CN.msi` - MSI installer (~6 MB)
 
             **Linux**
-            - `xxgcxy-wifi_2.0.6_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v2.0.6-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-2.0.6-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_2.0.7_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v2.0.7-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-2.0.7-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs curl or python3)
 
-            ## What's New in v2.0.6
+            ## What's New in v2.0.7
+
+            ### 🔥 保持移动热点开启守护 (Hotspot Keep-Alive)
+            - **突破校园网单账号限制**: 针对校园网单设备在线限制，学生使用电脑开启热点共享上网时，解决 Windows 默认因无设备连接而自动休眠关闭热点的痛点。
+            - **原生 WinRT 守护机制**: 采用 Windows 原生 WinRT API 实时探测并拉起热点，断线重连认证后联动恢复，保持数据连接永不断线。
 
             ### 🎨 客户端 UI 深度重构 (Dark Acrylic Glassmorphism)
             - **深色极客毛玻璃视效**: 采用深空流光微粒背景、24px 高斯模糊磨砂亚克力面板、超细 1px 微光边框。
             - **动态网络雷达环 (Hero Gauge)**: 140px 发光动态仪表盘，在线/待登录/掉线/检测中状态呼吸变色，直观醒目。
             - **学生身份名片 (Profile Card)**: 专属科技感头像、学号展示、移动/联通/电信专属品牌微光标签与一键更改抽屉。
+            - **精炼与安全优化**: 移除冗余的“保存并登录”按钮，默认窗口优化为 460×800 并设置最小约束，输入框示例参数全面脱敏匿名化。
             - **智能滑动开关 & 胶囊操作**: 扁平化无缝滑动开关与微光悬浮按键。
             - **可折叠活动时间轴 (Activity Terminal)**: 终端等宽字体，支持 `[+]` 绿标、`[!]` 红标、`[*]` 蓝标语义化高亮。
-
-            ### 🔥 保持移动热点开启守护 (Hotspot Keep-Alive)
-            - **突破校园网单账号限制**: 校园网通常限制单设备在线，利用电脑开启热点共享时，解决 Windows 超时休眠关闭热点的痛点。
-            - **原生 WinRT 守护机制**: 采用 Windows 原生 WinRT API 实时探测并拉起热点，断线重连认证后联动恢复，保持数据连接永不断线。
 
             ## What's New in v2.0.5
 
