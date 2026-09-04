@@ -747,23 +747,50 @@ $asTaskGeneric = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Ob
 function AwaitAction($WinRtTask, $ResultType) {
     $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
     $netTask = $asTask.Invoke($null, @($WinRtTask))
-    $netTask.Wait(8000) | Out-Null
+    $netTask.Wait(12000) | Out-Null
     return $netTask.Result
 }
 try {
     [Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType=WindowsRuntime] | Out-Null
     [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime] | Out-Null
     $profile = [Windows.Networking.Connectivity.NetworkInformation]::GetInternetConnectionProfile()
-    if ($null -eq $profile) {
+    $canTether = $false
+    if ($null -ne $profile) {
+        try {
+            $cap = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::GetTetheringCapabilityFromConnectionProfile($profile)
+            if ($cap.ToString() -eq 'Enabled') { $canTether = $true }
+        } catch {}
+    }
+    if (-not $canTether) {
         $profiles = [Windows.Networking.Connectivity.NetworkInformation]::GetConnectionProfiles()
-        if ($profiles.Count -gt 0) { $profile = $profiles[0] }
+        foreach ($p in $profiles) {
+            try {
+                $cap = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::GetTetheringCapabilityFromConnectionProfile($p)
+                if ($cap.ToString() -eq 'Enabled') {
+                    $profile = $p
+                    $canTether = $true
+                    break
+                }
+            } catch {}
+        }
     }
     if ($null -ne $profile) {
         $manager = [Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager]::CreateFromConnectionProfile($profile)
         $state = $manager.TetheringOperationalState.ToString()
+        $waitCount = 0
+        while ($state -eq 'InTransition' -and $waitCount -lt 4) {
+            Start-Sleep -Milliseconds 1000
+            $waitCount++
+            $state = $manager.TetheringOperationalState.ToString()
+        }
         if ($state -eq 'Off') {
             $res = AwaitAction ($manager.StartTetheringAsync()) ([Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult])
-            Write-Output "STARTED:$($res.Status)"
+            $status = $res.Status.ToString()
+            if ($status -eq 'Success' -or $status -eq 'AlreadyInProgress' -or $status -eq 'OperationInProgress') {
+                Write-Output "STARTED:Success"
+            } else {
+                Write-Output "STARTED:$status"
+            }
         } else {
             Write-Output "ACTIVE:$state"
         }
@@ -779,7 +806,14 @@ try {
             .output()
             .map_err(|e| format!("调用移动热点保活失败: {}", e))?;
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(stdout)
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if !stdout.is_empty() {
+            Ok(stdout)
+        } else if !stderr.is_empty() {
+            Err(format!("PowerShell stderr: {}", stderr))
+        } else {
+            Ok("EMPTY_OUTPUT".to_string())
+        }
     }
     #[cfg(not(windows))]
     {

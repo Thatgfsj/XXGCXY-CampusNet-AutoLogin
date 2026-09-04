@@ -1160,7 +1160,7 @@
                 }
                 document.getElementById('statusIcon').textContent = '⏳';
                 document.getElementById('statusText').textContent = '检测中...';
-                await checkNetwork();
+                await checkNetwork(true);
             });
             await listen("manual_connect_wifi", async () => {
                 addLog("托盘菜单触发：手动连接");
@@ -1254,6 +1254,11 @@
                     config = result;
                     selectedPrimary = config.primary_ssid || '';
                     selectedBackup = config.backup_ssid || '';
+                    if (typeof config.hotspot_keepalive === 'boolean') {
+                        hotspotKeepaliveEnabled = config.hotspot_keepalive;
+                        const toggle = document.getElementById('hotspotKeepaliveToggle');
+                        if (toggle) toggle.checked = hotspotKeepaliveEnabled;
+                    }
                     updateNetworkInfo();
                     // 更新配置界面的已选网络显示
                     document.getElementById('selectedPrimary').textContent = selectedPrimary || '未选择';
@@ -1273,8 +1278,36 @@
 
         }
         
+        // 移动热点守护执行函数
+        async function runHotspotKeepaliveCheck(isManual = false) {
+            if (!hotspotKeepaliveEnabled) return;
+            try {
+                if (isManual) {
+                    addLog('[*] 移动热点守护：正在检测热点状态...');
+                }
+                const res = await invoke('check_and_keep_hotspot_alive');
+                if (res && res.includes('STARTED:Success')) {
+                    addLog('[+] 移动热点守护：检测到热点已关闭，已自动重新拉起！');
+                } else if (res && res.includes('ACTIVE:On')) {
+                    if (isManual) {
+                        addLog('[+] 移动热点守护：移动热点当前正常运行就绪中');
+                    }
+                } else if (res && res.includes('ACTIVE:InTransition')) {
+                    addLog('[*] 移动热点守护：热点正处于系统切换过渡中 (InTransition)，系统平稳后将自动拉起');
+                } else if (res && res.startsWith('ERR:')) {
+                    addLog('[!] 移动热点守护异常: ' + res);
+                } else if (res && res.includes('STARTED:')) {
+                    addLog('[!] 移动热点拉起结果: ' + res);
+                } else if (isManual) {
+                    addLog('[*] 移动热点状态: ' + res);
+                }
+            } catch (e) {
+                addLog('[!] 移动热点保活调用异常: ' + e);
+            }
+        }
+
         // 检测网络状态
-        async function checkNetwork() {
+        async function checkNetwork(isManual = false) {
             // 如果正在登录，跳过检测
             if (isLoggingIn) {
                 return;
@@ -1287,14 +1320,10 @@
                 // 如果网络正常，重置登录状态并执行移动热点守护
                 if (status.internet_ok) {
                     isLoggingIn = false;
-                    if (hotspotKeepaliveEnabled) {
-                        try {
-                            const res = await invoke('check_and_keep_hotspot_alive');
-                            if (res && res.includes('STARTED:Success')) {
-                                addLog('[+] 移动热点守护：检测到热点已关闭，已自动重新拉起');
-                            }
-                        } catch (e) {}
+                    if (isManual) {
+                        addLog('[+] 网络连接正常（已连通外网）');
                     }
+                    await runHotspotKeepaliveCheck(isManual);
                     return;
                 }
                 
@@ -1307,14 +1336,7 @@
                     updateStatus(retryStatus);
                     if (retryStatus.internet_ok) {
                         addLog('重连后网络已恢复正常');
-                        if (hotspotKeepaliveEnabled) {
-                            try {
-                                const res = await invoke('check_and_keep_hotspot_alive');
-                                if (res && res.includes('STARTED:Success')) {
-                                    addLog('[+] 移动热点守护：已重新激活热点');
-                                }
-                            } catch (e) {}
-                        }
+                        await runHotspotKeepaliveCheck(isManual);
                         return;
                     }
                     if (retryStatus.needs_login) {
@@ -1607,7 +1629,7 @@
             document.getElementById('statusIcon').textContent = '⏳';
             document.getElementById('statusText').textContent = '正在探测网络...';
             document.getElementById('statusDetail').textContent = '正在检测网关与外网连通状态';
-            await checkNetwork();
+            await checkNetwork(true);
         }
         window.checkNow = checkNow;
         
