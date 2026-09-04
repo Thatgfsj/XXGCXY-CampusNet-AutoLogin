@@ -323,9 +323,9 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 #### 5.1.9 配置管理
 
 - **存储路径**：`~/.local/share/xxgcxy-wifi/config.json`（Linux）或 `%LOCALAPPDATA%/xxgcxy-wifi/config.json`（Windows）
-- **结构体**：`{ primary_ssid, backup_ssid, check_interval }`
+- **结构体**：`{ primary_ssid, backup_ssid, check_interval, hotspot_keepalive }`
 - **加载时机**：程序启动时、setup 阶段（如果已有配置则隐藏窗口）
-- **保存时机**：用户在配置面板点击"保存配置"
+- **保存时机**：用户在配置面板点击"保存配置"或切换热点常开开关
 - **首次运行判断**：`primary_ssid` 为空 → 首次运行 → 显示主窗口
 
 #### 5.1.10 Tauri Commands 清单
@@ -342,6 +342,9 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 | `toggle_check_enabled` | — | `bool` | 切换自动检测开关 |
 | `get_autostart_enabled` | — | `bool` | 获取开机自启状态 |
 | `set_autostart_enabled` | `enabled: bool` | `Result<()>` | 设置开机自启 |
+| `get_hotspot_keepalive` | — | `bool` | **(v2.0.7+)** 获取保持移动热点常开状态 |
+| `set_hotspot_keepalive` | `enabled: bool` | `Result<bool>` | **(v2.0.7+)** 设置保持移动热点常开并激活 |
+| `check_and_keep_hotspot_alive` | — | `Result<String>` | **(v2.0.7+)** 检查热点状态若关闭则拉起唤醒 |
 | `open_github` | — | `Result<()>` | 打开 GitHub 仓库 |
 | `load_campus_net_info` | — | `Result<CampusNetInfo>` | 读取校园网配置(学号/运营商) |
 | `clear_campus_net_info` | — | `Result<()>` | 删除校园网配置 + 旧文件清理 |
@@ -395,37 +398,38 @@ pub struct ParsedPortal {
 
 **文件行数**：910 行（单文件，CSS + HTML + JS 内联）
 
-#### 5.2.1 界面结构
+#### 5.2.1 界面结构 (v2.0.7+ 深色极客毛玻璃规范)
 
 三个屏幕，通过 `.hidden` 类切换显示：
 
 **主界面（mainScreen）**：
-- 状态面板（图标 + 状态文字 + 详情）
-- 网络信息面板（当前 WiFi / 主网络 / 备用网络 / 检测间隔）
-- "立即检测网络" 按钮
-- 自动检测开关（toggle）
-- 开机自启动开关（toggle）
-- "设置" 按钮(v1.9.0+ 改名为"设置",原"网络配置")→ 切换到设置界面
-- 日志面板（黑色终端风格，保留最近 50 条）
-- GitHub 链接
+- **顶栏 Header**：微光 Logo + 标题 + 版本胶囊 (`v2.0.7`) + 磨砂亚克力【⚙️ 设置】按钮
+- **核心状态仪表盘（Hero Gauge）**：140px SVG 动态发光网络健康雷达环，在线/待登录/掉线/检测中状态呼吸变色与雷达扫描
+- **网络信息面板**：当前 WiFi（`#currentWifi`）与检测周期卡片
+- **学生身份数字名片（Profile Card）**：科技感头像、学号展示、中国移动/联通/电信色彩微光徽章与【✏️ 更改】快捷抽屉入口
+- **智能开关组（Toggles Group）**：
+  1. 🔔 自动保活与断线自愈 (`#autoCheckToggle`)
+  2. 🚀 开机后台静默自启 (`#autostartToggle`)
+  3. 🔥 保持移动热点开启 (`#hotspotKeepaliveToggle`, v2.0.7+) — 实时守护热点防超时关闭
+- **快捷操作按钮**：【🔄 立即检测并重连】（`#checkNowBtn`）
+- **可折叠活动时间轴（Activity Terminal）**：等宽字体终端输出，支持 `[+]` 绿标、`[!]` 红标、`[*]` 蓝标语义高亮与自由收折
 
-**登录配置界面（loginConfigScreen, v1.9.0+）**:
-- 运营商下拉(移动/联通/电信)
-- 学号输入(纯数字校验)
-- 密码输入(DOM 不缓存,每次保存后清空)
-- Portal URL 输入 + 「解析」按钮(粘贴 portal.do 重定向 URL 自动填表)
-- 高级字段折叠区(SSID / AC 名称 / AC IP / VLAN / MAC / 主机名)
-- 「保存」/「保存并登录」/「取消」按钮
-- 首次启动时强制弹出,提供"稍后"按钮可跳过
+**登录配置界面（loginConfigScreen, v1.9.0+ / v2.0.7 优化）**:
+- 运营商选择下拉框 (移动/联通/电信)
+- 学生学号输入框 (纯数字校验，脱敏示例 `2024010101`)
+- 校园网登录密码输入框 (密码采用 Windows DPAPI 加密存储)
+- Portal 认证地址输入框 + 【自动提纯】一体化胶囊按钮 (粘贴 portal.do 自动抽取网络参数并剥离多余 query)
+- 高级字段折叠手风琴 (AC 名称 / VLAN / IP / MAC / 主机名)
+- 【稍后 / 取消】与【💾 保存配置】主按钮 (v2.0.7 移除了多余的“保存并登录”按钮)
 
-**设置界面（setupScreen,v1.9.0+ 改名为"设置",原"网络配置"）**：
+**设置界面（setupScreen）**：
 - 顶部分组:"📡 WiFi 网络"
-- WiFi 列表（带信号强度、可点击选择主/备用网络）
+- WiFi 列表（带信号强度、发光选中框、可点击选择主/备用网络）
 - 已选主网络 / 备用网络显示
 - 检测间隔输入（5-300 秒）
-- 校园网信息卡片(学号 / 运营商,来源:`%APPDATA%/xxgcxy-wifi/login_profile.json` v1.9.0+)
-- "更改账号信息" 按钮(v1.9.0+,跳转 loginConfigScreen)
-- 清理校园网信息按钮(带二次确认,同时清理旧 `xxgc_campus_net_config.txt`)
+- 校园网信息卡片(学号 / 运营商徽章)
+- "更改账号信息" 按钮(跳转 loginConfigScreen)
+- 清理校园网信息按钮(带二次确认)
 - 保存 / 返回按钮
 
 #### 5.2.2 核心状态机

@@ -35,6 +35,18 @@
    - 调用 PowerShell 脚本 `xywdl.ps1` 进行校园网认证
    - 登录失败时记录日志
 
+6. **移动热点常开守护 (v2.0.7+)**
+   - 突破校园网单账号/单设备在线限制
+   - 采用 Windows 原生 WinRT API 实时探测移动热点状态
+   - 防止因超时无设备连接被系统自动休眠关闭
+   - 掉线重连与认证成功后联动拉起，保障共享网络持续不断线
+
+7. **深色极客毛玻璃 UI (v2.0.7+)**
+   - 采用 Dark Acrylic 磨砂亚克力微光画布
+   - 140px 发光动态网络健康雷达仪表环（Hero Gauge），在线/待认证/掉线/探测中状态呼吸变色
+   - 学生身份数字名片（Profile Card），支持移动/联通/电信品牌色彩徽章与快捷修改抽屉
+   - 智能平滑滑动开关，可折叠终端等宽语义高亮日志
+
 ### 2.2 用户交互
 
 1. **首次运行**
@@ -123,6 +135,7 @@
   "primary_ssid": "主网络名称",
   "backup_ssid": "备用网络名称",
   "check_interval": 15,
+  "hotspot_keepalive": false,
   "test_hosts": ["https://example.com/", "http://connect.rom.miui.com/generate_204"]
 }
 ```
