@@ -45,7 +45,57 @@ class Handler(BaseHTTPRequestHandler):
         with open(server.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
+        # 动态读取 codefile (如果提供)
         code_key = getattr(server, "code", "0")
+        if server.codefile:
+            try:
+                with open(server.codefile, "r", encoding="utf-8") as cf:
+                    code_key = cf.read().strip()
+            except Exception:
+                pass
+
+        # 1. 互联网连通性 / 204 探针
+        if path == "/generate_204":
+            if code_key in ("302_redirect", "302"):
+                loc = "http://127.0.0.1:18080/portal.do?wlanuserip=10.12.34.56&wlanacname=AC-TEST&vlan=100&mac=18-c0-4d-82-11-22&wlanacIp=172.18.252.1"
+                self.send_response(302)
+                self.send_header("Location", loc)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            elif code_key == "fake_200_html":
+                html = b"<!DOCTYPE html><html><head><title>Portal Login</title></head><body>Redirect to login</body></html>"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(html)))
+                self.end_headers()
+                self.wfile.write(html)
+                return
+            else:
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+        # 2. 302 劫持响应 (用于参数嗅探与拦截)
+        if code_key in ("302_redirect", "302"):
+            loc = "http://127.0.0.1:18080/portal.do?wlanuserip=10.12.34.56&wlanacname=AC-TEST&vlan=100&mac=18-c0-4d-82-11-22&wlanacIp=172.18.252.1"
+            self.send_response(302)
+            self.send_header("Location", loc)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        # 3. 假 200 页面 (Captive Portal 拦截但返回 200 HTML)
+        if code_key == "fake_200_html":
+            html = b"<!DOCTYPE html><html><head><title>Portal Login</title></head><body>Please login to campus net</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+            return
+
         body = RESPONSE_TEMPLATES.get(code_key, RESPONSE_TEMPLATES["0"]).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -58,7 +108,6 @@ class Handler(BaseHTTPRequestHandler):
 
     @property
     def partial_path(self):
-        # 兼容:BaseHTTPRequestHandler 只给了 self.path
         return self.path
 
 
@@ -81,11 +130,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=18080)
     ap.add_argument("--code", default="0")
+    ap.add_argument("--codefile", default=None)
     ap.add_argument("--log", default="mock_portal.log")
     args = ap.parse_args()
 
     server = HTTPServer(("127.0.0.1", args.port), Handler)
     server.code = args.code
+    server.codefile = args.codefile
     server.log_path = args.log
     print(f"MOCK_READY port={args.port} code={args.code} log={args.log}", flush=True)
     server.serve_forever()

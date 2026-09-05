@@ -1187,6 +1187,27 @@
             } catch (e) {
                 console.log('获取移动热点保活状态失败');
             }
+            // 监听 Rust 后端核心保活状态机事件
+            try {
+                await listen('service-status-changed', (event) => {
+                    handleBackendStatusChanged(event.payload);
+                });
+                await listen('backend-log', (event) => {
+                    addLog(event.payload);
+                });
+                await listen('backend-alert', (event) => {
+                    addLog('[!] 业务告警: ' + event.payload);
+                    const detail = document.getElementById('statusDetail');
+                    if (detail) detail.textContent = event.payload;
+                });
+                const initStatus = await invoke('get_service_status');
+                if (initStatus) {
+                    handleBackendStatusChanged(initStatus);
+                }
+            } catch (e) {
+                console.log('监听后端事件失败:', e);
+            }
+
             // 监听托盘菜单事件
             await listen('check_network', async () => {
                 addLog('托盘菜单触发：立即检测');
@@ -1197,35 +1218,103 @@
                 }
                 document.getElementById('statusIcon').textContent = '⏳';
                 document.getElementById('statusText').textContent = '检测中...';
-                await checkNetwork(true);
             });
             await listen("manual_connect_wifi", async () => {
                 addLog("托盘菜单触发：手动连接");
                 await manualWifiConnect();
             });
             await listen("run_login", async () => {
-                addLog("托盘菜单触发：直接执行登录脚本");
-                await runLoginScript();
+                addLog("托盘菜单触发：直接执行登录");
             });
 
-            await checkNetwork();
-
-            // 启动定时检测
+            // 启动轻量辅助定时器 (退避倒计时刷新 & 移动热点守护)
             startCheckInterval();
         };
+
+        let currentBackendStatus = null;
+
+        function handleBackendStatusChanged(status) {
+            if (!status) return;
+            currentBackendStatus = status;
+
+            const gauge = document.getElementById('gaugeCard');
+            const icon = document.getElementById('statusIcon');
+            const text = document.getElementById('statusText');
+            const detail = document.getElementById('statusDetail');
+            const currentWifi = document.getElementById('currentWifi');
+
+            if (currentWifi) {
+                currentWifi.textContent = status.wifi_connected || '未连接 WiFi';
+            }
+
+            if (gauge) {
+                gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected', 'state-checking');
+            }
+
+            const state = status.state;
+            if (state === 'Connected') {
+                if (gauge) gauge.classList.add('state-connected');
+                if (icon) icon.textContent = '✓';
+                if (text) {
+                    text.textContent = '网络已认证连接';
+                    text.className = 'status-text';
+                }
+                if (detail) detail.textContent = '校园网畅通 · Rust 后端全天候自动保活中';
+            } else if (state === 'LoggingIn') {
+                if (gauge) gauge.classList.add('state-checking');
+                if (icon) icon.textContent = '⏳';
+                if (text) {
+                    text.textContent = '正在认证中...';
+                    text.className = 'status-text';
+                }
+                if (detail) detail.textContent = 'Rust 原生直发认证中，校验 204 放行...';
+            } else if (typeof state === 'object' && state.Backoff) {
+                if (gauge) gauge.classList.add('state-needs-login');
+                if (icon) icon.textContent = '⚠️';
+                const secs = status.backoff_remaining_secs || state.Backoff.next_retry_secs || 0;
+                if (text) {
+                    text.textContent = `保护性退避等待 (${secs}s)`;
+                    text.className = 'status-text';
+                }
+                if (detail) {
+                    detail.textContent = `认证拒绝: ${state.Backoff.reason || '账号或密码错误'}，暂停高频重试以防锁号`;
+                }
+            } else if (state === 'NeedsLogin') {
+                if (gauge) gauge.classList.add('state-needs-login');
+                if (icon) icon.textContent = '🔐';
+                if (text) {
+                    text.textContent = '需要 Portal 认证';
+                    text.className = 'status-text';
+                }
+                if (detail) detail.textContent = `已连接「${status.wifi_connected || ''}」，待后端自动认证`;
+            } else {
+                if (gauge) gauge.classList.add('state-disconnected');
+                if (icon) icon.textContent = '⚡';
+                if (text) {
+                    text.textContent = 'WiFi 网络未就绪';
+                    text.className = 'status-text';
+                }
+                if (detail) detail.textContent = '未检测到目标校园网连接';
+            }
+        }
         
-        // 启动定时检测
+        // 启动辅助定时器 (倒计时与热点常开拉起)
         function startCheckInterval() {
             if (checkIntervalId) {
                 clearInterval(checkIntervalId);
             }
-            // 限制心跳间隔：默认 15 秒，上限 60 秒，防止过长间隔导致断网自愈迟缓
-            const sec = (config.check_interval && config.check_interval <= 60 && config.check_interval >= 5) ? config.check_interval : 15;
             checkIntervalId = setInterval(async () => {
-                if (autoCheckEnabled) {
-                    await checkNetwork();
+                if (currentBackendStatus && currentBackendStatus.backoff_remaining_secs > 0) {
+                    currentBackendStatus.backoff_remaining_secs -= 1;
+                    const text = document.getElementById('statusText');
+                    if (text && typeof currentBackendStatus.state === 'object' && currentBackendStatus.state.Backoff) {
+                        text.textContent = `保护性退避等待 (${currentBackendStatus.backoff_remaining_secs}s)`;
+                    }
                 }
-            }, sec * 1000);
+                if (hotspotKeepaliveEnabled) {
+                    await runHotspotKeepaliveCheck(false);
+                }
+            }, 1000);
         }
         
         // 切换自动检测
@@ -1589,44 +1678,20 @@
             }
         }
         
-        // 运行登录脚本
+        // 运行登录 (优先由 Rust 后端原生直发并复验)
         async function runLoginScript() {
-            // 防止重复登录
-            if (isLoggingIn) {
-                console.log('已在登录中，跳过');
-                return;
-            }
-            
-            isLoggingIn = true;
-            lastLoginTime = Date.now();
-            
             try {
-                addLog('正在执行登录脚本...');
-                const result = await invoke('run_login_script');
-                addLog(result);
-                await sleep(2000);  // 等待网络生效
-                
-                // 登录后重新检测
-                const status = await invoke('check_network');
-                updateStatus(status);
-                if (status.internet_ok) {
-                    addLog('[+] 网络已恢复正常');
-                } else {
-                    addLog('[!] 登录后仍无法上网，请检查账号密码');
-                }
+                addLog('[*] 正在触发认证流程 (Rust 原生直发优先)...');
+                await invoke('trigger_manual_login');
             } catch (e) {
-                addLog('[!] 登录失败: ' + e);
-            } finally {
-                // 登录执行完毕后立即释放登录锁，绝不堵塞网络检测与手动操作
-                isLoggingIn = false;
+                addLog('[!] 触发登录失败: ' + e);
             }
         }
+        window.runLoginScript = runLoginScript;
         
-        // 立即检测
+        // 立即检测 (由 Rust 后端核心状态机探测)
         async function checkNow() {
-            addLog('正在检测网络...');
-            isLoggingIn = false; // 用户主动点立即检测时，清除卡滞锁
-            lastLoginTime = 0;   // 允许立即重试登录
+            addLog('正在探测网络 (Rust 后端)...');
             const gauge = document.getElementById('gaugeCard');
             if (gauge) {
                 gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected');
@@ -1634,8 +1699,12 @@
             }
             document.getElementById('statusIcon').textContent = '⏳';
             document.getElementById('statusText').textContent = '正在探测网络...';
-            document.getElementById('statusDetail').textContent = '正在检测网关与外网连通状态';
-            await checkNetwork(true);
+            document.getElementById('statusDetail').textContent = 'Rust 后端状态机探测中...';
+            try {
+                await invoke('trigger_manual_check');
+            } catch (e) {
+                addLog('[!] 触发检测失败: ' + e);
+            }
         }
         window.checkNow = checkNow;
         

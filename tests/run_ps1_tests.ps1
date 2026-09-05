@@ -112,8 +112,9 @@ $portMap = @{
     "0"   = 18080; "1"   = 18081; "44"  = 18082; "99"  = 18083
     "10"  = 18084; "100" = 18085; "123" = 18086; "440" = 18087
     "ac_device_error" = 18088; "ac_string_zero" = 18089
+    "302_redirect" = 18090; "fake_200_html" = 18091
 }
-foreach ($code in @("0","1","44","99","10","100","123","440","ac_device_error","ac_string_zero")) {
+foreach ($code in @("0","1","44","99","10","100","123","440","ac_device_error","ac_string_zero","302_redirect","fake_200_html")) {
     Ensure-Mock $code $portMap[$code] | Out-Null
 }
 
@@ -235,6 +236,9 @@ $AppData = New-CaseAppData "case_e1"
 Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
 $codes = @()
 foreach ($n in 1..5) { $rr = Invoke-Xywdl -AppData $AppData; $codes += $rr.ExitCode; Start-Sleep -Milliseconds 200 }
+$allZero = ($codes -join ',') -eq '0,0,0,0,0'
+Assert-True ($codes.Count -eq 5 -and $allZero) "E1 连续 5 次调用全部返回 0" "codes=$($codes -join ',')"
+
 Write-Host "===== F. 真实校园网 AC 响应与 URL 净化强健性测试 =====" -ForegroundColor Cyan
 # F1: 脏 BaseURL (带有完整 query string 如 ?wlanuserip=...&url=...)
 $AppData = New-CaseAppData "case_f1"
@@ -272,6 +276,23 @@ $AppData = New-CaseAppData "case_f3"
 Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
 $r3 = Invoke-Xywdl -AppData $AppData
 Assert-True ($r3.ExitCode -eq 0) "F3 code='0' 字符串 0 正确识别为认证成功" "exit=$($r3.ExitCode)"
+
+Write-Host "===== G. 302 劫持与假 200 页面安全防御测试 =====" -ForegroundColor Cyan
+# G1: 302 重定向劫持 -> 绝不误判为成功 (exit code 不应为 0)
+$AppData = New-CaseAppData "case_g1"
+(New-TestProfile -BaseUrl "http://127.0.0.1:18090/portal.do" | ConvertTo-Json) |
+    Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
+Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
+$rg1 = Invoke-Xywdl -AppData $AppData
+Assert-True ($rg1.ExitCode -ne 0) "G1 302 重定向绝不误判为认证成功" "exit=$($rg1.ExitCode)"
+
+# G2: 假 200 HTML 页面 -> 绝不误判为成功 (exit code 不应为 0)
+$AppData = New-CaseAppData "case_g2"
+(New-TestProfile -BaseUrl "http://127.0.0.1:18091/portal.do" | ConvertTo-Json) |
+    Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
+Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
+$rg2 = Invoke-Xywdl -AppData $AppData
+Assert-True ($rg2.ExitCode -ne 0) "G2 假 200 页面绝不误判为认证成功" "exit=$($rg2.ExitCode)"
 
 # ---------- 清理 ----------
 foreach ($m in $mocks.Values) { Stop-Process -Id $m.Proc.Id -Force -ErrorAction SilentlyContinue }

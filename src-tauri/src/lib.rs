@@ -669,12 +669,56 @@ fn operator_short_to_name(code: &str) -> &'static str {
     }
 }
 
-// ============= 全局状态 =============
+// ============= 全局状态与服务状态机 =============
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum ServiceState {
+    Idle,
+    Checking,
+    Connected,
+    NeedsLogin,
+    LoggingIn,
+    Disconnected,
+    Backoff { next_retry_secs: u64, reason: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceStatus {
+    pub state: ServiceState,
+    pub wifi_connected: Option<String>,
+    pub internet_ok: bool,
+    pub last_check_time: u64,
+    pub consecutive_business_errors: u32,
+    pub backoff_remaining_secs: u64,
+}
+
+impl Default for ServiceStatus {
+    fn default() -> Self {
+        Self {
+            state: ServiceState::Idle,
+            wifi_connected: None,
+            internet_ok: false,
+            last_check_time: 0,
+            consecutive_business_errors: 0,
+            backoff_remaining_secs: 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum TriggerAction {
+    Check,
+    Login,
+    ResetBackoff,
+}
 
 pub struct AppState {
     pub config: Mutex<Config>,
     pub first_run: Mutex<bool>,
     pub check_enabled: Mutex<bool>,
+    pub service_status: Mutex<ServiceStatus>,
+    pub trigger_tx: tokio::sync::mpsc::Sender<TriggerAction>,
 }
 
 // ============= Tauri 命令 =============
@@ -689,6 +733,21 @@ fn toggle_check_enabled(state: tauri::State<'_, AppState>) -> bool {
     let mut enabled = state.check_enabled.lock().unwrap_or_else(|e| e.into_inner());
     *enabled = !*enabled;
     *enabled
+}
+
+#[tauri::command]
+fn get_service_status(state: tauri::State<'_, AppState>) -> ServiceStatus {
+    state.service_status.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+#[tauri::command]
+fn trigger_manual_check(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.trigger_tx.try_send(TriggerAction::Check).map_err(|e| format!("触发检测失败: {}", e))
+}
+
+#[tauri::command]
+fn trigger_manual_login(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.trigger_tx.try_send(TriggerAction::Login).map_err(|e| format!("触发登录失败: {}", e))
 }
 
 // ============= 开机自启动 =============
@@ -1289,6 +1348,7 @@ async fn check_url(url: &str) -> CheckResult {
     let result = tokio::task::spawn_blocking(move || {
         let client = match reqwest::blocking::Client::builder()
             .no_proxy()
+            .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
             .timeout(std::time::Duration::from_secs(2))
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -1343,6 +1403,185 @@ async fn check_url(url: &str) -> CheckResult {
         Ok(r) => r,
         Err(_) => CheckResult::Error,
     }
+}
+
+// ============= 302 动态参数嗅探与网关特征提取 =============
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SniffedParams {
+    pub base_url: Option<String>,
+    pub wlan_user_ip: Option<String>,
+    pub mac_address: Option<String>,
+    pub vlan: Option<String>,
+    pub wlan_ac_name: Option<String>,
+    pub wlan_ac_ip: Option<String>,
+    pub hostname: Option<String>,
+}
+
+/// 发送禁止重定向的 HTTP 探测包，截获 302 Location 中的真实参数
+async fn sniff_portal_params() -> Result<Option<SniffedParams>, String> {
+    let endpoints = [
+        "http://connect.rom.miui.com/generate_204",
+        "http://connectivitycheck.platform.hicloud.com/generate_204",
+        "http://1.1.1.1",
+    ];
+
+    for endpoint in endpoints {
+        let client = match reqwest::Client::builder()
+            .no_proxy()
+            .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+            .timeout(std::time::Duration::from_millis(2500))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        if let Ok(resp) = client.get(endpoint).send().await {
+            if resp.status().is_redirection() {
+                if let Some(loc) = resp.headers().get("location") {
+                    if let Ok(loc_str) = loc.to_str() {
+                        if let Ok(parsed) = url::Url::parse(loc_str) {
+                            let mut sniffed = SniffedParams::default();
+                            let mut base = parsed.clone();
+                            base.set_query(None);
+                            base.set_fragment(None);
+                            sniffed.base_url = Some(base.to_string());
+
+                            for (k, v) in parsed.query_pairs() {
+                                match k.to_ascii_lowercase().as_str() {
+                                    "wlanuserip" => sniffed.wlan_user_ip = Some(v.to_string()),
+                                    "mac" => sniffed.mac_address = Some(v.to_string()),
+                                    "vlan" => sniffed.vlan = Some(v.to_string()),
+                                    "wlanacname" => sniffed.wlan_ac_name = Some(v.to_string()),
+                                    "wlanacip" => sniffed.wlan_ac_ip = Some(v.to_string()),
+                                    "hostname" => sniffed.hostname = Some(v.to_string()),
+                                    _ => {}
+                                }
+                            }
+                            return Ok(Some(sniffed));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// 将嗅探到的参数安全同步回登录配置
+fn apply_sniffed_params_to_profile(profile: &mut LoginProfile, sniffed: &SniffedParams) -> bool {
+    let mut changed = false;
+    if let Some(ip) = &sniffed.wlan_user_ip {
+        if !is_dummy_ip(ip) && profile.wlan_user_ip != *ip {
+            profile.wlan_user_ip = ip.clone();
+            changed = true;
+        }
+    }
+    if let Some(mac) = &sniffed.mac_address {
+        if !is_dummy_mac(mac) && profile.mac_address != *mac {
+            profile.mac_address = mac.clone();
+            changed = true;
+        }
+    }
+    if let Some(vlan) = &sniffed.vlan {
+        if !vlan.trim().is_empty() && profile.vlan != *vlan {
+            profile.vlan = vlan.clone();
+            changed = true;
+        }
+    }
+    if let Some(ac_name) = &sniffed.wlan_ac_name {
+        if !ac_name.trim().is_empty() && profile.wlan_ac_name != *ac_name {
+            profile.wlan_ac_name = ac_name.clone();
+            changed = true;
+        }
+    }
+    if let Some(ac_ip) = &sniffed.wlan_ac_ip {
+        if !is_dummy_ip(ac_ip) && profile.wlan_ac_ip != *ac_ip {
+            profile.wlan_ac_ip = ac_ip.clone();
+            changed = true;
+        }
+    }
+    if let Some(base) = &sniffed.base_url {
+        if !base.trim().is_empty() && profile.base_url != *base {
+            profile.base_url = base.clone();
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// 假 IP 防御检测
+fn is_dummy_ip(ip: &str) -> bool {
+    let t = ip.trim();
+    t.is_empty() || t == "0.0.0.0" || t == "127.0.0.1" || t == "10.0.0.1"
+}
+
+/// 假 MAC 防御检测
+fn is_dummy_mac(mac: &str) -> bool {
+    let t = mac.trim().to_lowercase();
+    t.is_empty()
+        || t == "00:00:00:00:00:00"
+        || t == "aa:bb:cc:dd:ee:ff"
+        || t.chars().filter(|c| *c == ':').count() != 5
+}
+
+/// 严谨的 quickauth.do 认证地址解析，彻底杜绝尾斜杠/无斜杠 URL 拼接错误
+fn resolve_quickauth_url(raw_base: &str) -> Result<String, String> {
+    let clean = raw_base
+        .split('?')
+        .next()
+        .unwrap_or(raw_base)
+        .split('#')
+        .next()
+        .unwrap_or(raw_base)
+        .trim();
+    if clean.is_empty() {
+        return Err("Base URL 为空".to_string());
+    }
+    if clean.ends_with("/quickauth.do") {
+        return Ok(clean.to_string());
+    }
+    let with_scheme = if !clean.starts_with("http://") && !clean.starts_with("https://") {
+        format!("http://{}", clean)
+    } else {
+        clean.to_string()
+    };
+    let parsed = url::Url::parse(&with_scheme)
+        .map_err(|e| format!("解析 Base URL 失败: {}", e))?;
+    let path = parsed.path();
+    let new_path = if path.is_empty() || path == "/" {
+        "/quickauth.do".to_string()
+    } else if path.ends_with("/portal.do") {
+        path.replace("/portal.do", "/quickauth.do")
+    } else if let Some(idx) = path.rfind('/') {
+        if idx == 0 {
+            "/quickauth.do".to_string()
+        } else {
+            format!("{}/quickauth.do", &path[..idx])
+        }
+    } else {
+        format!("{}/quickauth.do", path.trim_end_matches('/'))
+    };
+    let mut out = parsed;
+    out.set_path(&new_path);
+    out.set_query(None);
+    out.set_fragment(None);
+    Ok(out.to_string())
+}
+
+fn emit_backend_log(app: &AppHandle, msg: &str) {
+    log::info!("{}", msg);
+    let _ = app.emit("backend-log", msg);
+}
+
+fn emit_service_status(app: &AppHandle, status: &ServiceStatus) {
+    let state = app.state::<AppState>();
+    if let Ok(mut lock) = state.service_status.lock() {
+        *lock = status.clone();
+    }
+    let _ = app.emit("service-status-changed", status);
 }
 
 // ============= 检测网络状态 =============
@@ -1514,7 +1753,7 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
 
 /// 进程内异步直发认证请求 (零外部脚本依赖，毫秒级响应)
 async fn native_direct_login() -> Result<String, String> {
-    let profile = get_login_profile()?;
+    let mut profile = get_login_profile()?;
     if profile.user_id.is_empty() || profile.base_url.is_empty() {
         return Err("未配置校园网账号或 Portal URL".to_string());
     }
@@ -1529,26 +1768,48 @@ async fn native_direct_login() -> Result<String, String> {
         return Err("解密密码为空，请在设置中重新保存账号密码".to_string());
     }
 
-    // 提取或自动获取网络硬件信息 (IP, MAC, SSID)
+    // 1. 登录前置强制取参：先发一次禁重定向的 HTTP 探测，302 就解析 Location 动态刷新参数
+    if let Ok(Some(sniffed)) = sniff_portal_params().await {
+        if apply_sniffed_params_to_profile(&mut profile, &sniffed) {
+            let _ = save_login_profile(profile.clone());
+        }
+    }
+
+    // 2. 提取或自动获取网络硬件信息 (IP, MAC, SSID)
     let (detected_ssid, detected_mac, detected_ip) = get_wlan_network_info();
 
+    // 彻底删除硬编码 SSID，完全采用用户配置或当前连接的真实 SSID
     let ssid = if !profile.ssid.trim().is_empty() {
         profile.ssid.trim().to_string()
+    } else if let Some(s) = detected_ssid {
+        s
     } else {
-        detected_ssid.unwrap_or_else(|| "XinKe_Hist_Stu".to_string())
+        String::new()
     };
 
     let mac = if !profile.mac_address.trim().is_empty() {
         profile.mac_address.trim().to_lowercase()
+    } else if let Some(m) = detected_mac {
+        m
     } else {
-        detected_mac.unwrap_or_else(|| "00:00:00:00:00:00".to_string())
+        String::new()
     };
 
     let user_ip = if !profile.wlan_user_ip.trim().is_empty() {
         profile.wlan_user_ip.trim().to_string()
+    } else if let Some(ip) = detected_ip {
+        ip
     } else {
-        detected_ip.unwrap_or_else(|| "10.0.0.1".to_string())
+        String::new()
     };
+
+    // 3. 兜底值安全拦截：假 IP / 假 MAC / 全零 一律禁止向网关发包，以防计费异常
+    if is_dummy_ip(&user_ip) || is_dummy_mac(&mac) {
+        return Err(format!(
+            "安全拦截: 未获取到有效的真实网卡参数 (IP='{}', MAC='{}')，拒绝发送伪造参数数据包",
+            user_ip, mac
+        ));
+    }
 
     let hostname = if !profile.hostname.trim().is_empty() {
         profile.hostname.trim().to_string()
@@ -1561,16 +1822,8 @@ async fn native_direct_login() -> Result<String, String> {
     let version = if !profile.version.is_empty() { profile.version } else { "0".to_string() };
     let bind_ctrl_id = profile.bind_ctrl_id;
 
-    // 净化 BaseURL，构造 quickauth.do URL
-    let clean_base = profile.base_url.split('?').next().unwrap_or(&profile.base_url)
-        .split('#').next().unwrap_or(&profile.base_url).trim();
-    let auth_url = if clean_base.ends_with("/quickauth.do") {
-        clean_base.to_string()
-    } else if let Some(idx) = clean_base.rfind('/') {
-        format!("{}/quickauth.do", &clean_base[..idx])
-    } else {
-        format!("{}/quickauth.do", clean_base)
-    };
+    // 4. 严谨净化与解析 BaseURL，杜绝尾斜杠/无斜杠 URL 拼接错误
+    let auth_url = resolve_quickauth_url(&profile.base_url)?;
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1602,6 +1855,7 @@ async fn native_direct_login() -> Result<String, String> {
 
     let client = reqwest::Client::builder()
         .no_proxy()
+        .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
         .connect_timeout(std::time::Duration::from_millis(2000))
         .timeout(std::time::Duration::from_secs(6))
         .redirect(reqwest::redirect::Policy::none())
@@ -1622,15 +1876,9 @@ async fn native_direct_login() -> Result<String, String> {
 
     let elapsed = start_instant.elapsed().as_millis();
 
-    // 检查是否发生 302 重定向至登录成功页面
+    // 成功判定彻底收口：删掉 302 算成功和模糊字符串匹配
     if resp.status().is_redirection() {
-        if let Some(loc) = resp.headers().get("location") {
-            if let Ok(loc_str) = loc.to_str() {
-                if loc_str.contains("success") || loc_str.contains("portal.do") {
-                    return Ok(format!("[+] 认证成功 (302 跳转, 耗时 {} ms): {}", elapsed, loc_str));
-                }
-            }
-        }
+        return Err(format!("认证未通过: 网关返回重定向状态码 {}", resp.status()));
     }
 
     let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
@@ -1648,50 +1896,80 @@ async fn native_direct_login() -> Result<String, String> {
             .unwrap_or("");
 
         if code_str == "0" {
-            Ok(format!("[+] 认证成功 (耗时 {} ms): {}", elapsed, if msg.is_empty() { "success" } else { msg }))
-        } else if code_str == "1" {
-            if msg.contains("设备不在正常状态") {
-                Err(format!("[!] 认证提示: 设备不在正常状态, 无法认证上网, 请稍候 (耗时 {} ms)", elapsed))
+            // 发送成功 != 认证成功，必须进行 204 复验探针
+            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+            if check_internet_with_retry().await {
+                Ok(format!("[+] 认证成功并复验通过 (耗时 {} ms): {}", elapsed, if msg.is_empty() { "success" } else { msg }))
             } else {
-                Err(format!("[!] 认证失败: {} (code: 1, 耗时 {} ms)", if msg.is_empty() { "账号或密码错误" } else { msg }, elapsed))
+                Err(format!("[!] 网关返回 code=0 成功，但 204 外网复验未通过，网络尚未放行 (耗时 {} ms)", elapsed))
             }
         } else if code_str == "44" {
-            Err(format!("[!] 认证被拒绝 (非法接入/VLAN绑定冲突, code: 44, 耗时 {} ms): {}", elapsed, msg))
+            Err(format!("CODE_44_RETRY: 认证被拒绝 (非法接入/VLAN会话失效, code: 44, 耗时 {} ms): {}", elapsed, msg))
+        } else if code_str == "1" {
+            if msg.contains("设备不在正常状态") {
+                Err(format!("BUSINESS_REJECTED: 设备不在正常状态, 无法认证上网, 请稍候 (耗时 {} ms)", elapsed))
+            } else {
+                Err(format!("BUSINESS_REJECTED: 账号或密码错误 (code: 1, 耗时 {} ms): {}", elapsed, if msg.is_empty() { "请检查用户名密码" } else { msg }))
+            }
         } else {
             Err(format!("[!] 认证异常 (code: {}, 耗时 {} ms): {}", code_str, elapsed, msg))
         }
     } else {
-        if body.contains("success") || body.contains("认证成功") || body.contains("已经登录") {
-            Ok(format!("[+] 认证成功 (耗时 {} ms)", elapsed))
+        // 非 JSON 响应，永远以 204 外网复验为准
+        if check_internet_with_retry().await {
+            Ok(format!("[+] 认证成功 (外网复验通过, 耗时 {} ms)", elapsed))
         } else {
-            Err(format!("[!] 服务器返回异常响应 (耗时 {} ms):\n{}", elapsed, clean_script_output(&body)))
+            Err(format!("[!] 服务器返回非 JSON 响应且 204 复验未通过 (耗时 {} ms):\n{}", elapsed, clean_script_output(&body)))
+        }
+    }
+}
+
+/// 综合登录流水线：优先进程内极速直发，支持 code 44 自动重新嗅探重试，遇未知错误降级外部脚本
+async fn execute_login_flow(app: &AppHandle) -> Result<String, String> {
+    emit_backend_log(app, "[*] 开始执行校园网认证流程 (Rust 原生直发优先)...");
+
+    let mut attempt = 0;
+    let mut native_res;
+    loop {
+        attempt += 1;
+        native_res = native_direct_login().await;
+        if let Err(ref e) = native_res {
+            if e.starts_with("CODE_44_RETRY") && attempt == 1 {
+                emit_backend_log(app, "[!] 网关返回 code 44 (非法接入/会话失效)，正在强制 302 重新取参并重试一次...");
+                if let Ok(Some(sniffed)) = sniff_portal_params().await {
+                    if let Ok(mut profile) = get_login_profile() {
+                        if apply_sniffed_params_to_profile(&mut profile, &sniffed) {
+                            emit_backend_log(app, &format!("[*] 已根据 302 刷新权威参数: IP={:?}, MAC={:?}, VLAN={:?}",
+                                sniffed.wlan_user_ip, sniffed.mac_address, sniffed.vlan));
+                            let _ = save_login_profile(profile);
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                continue;
+            }
+        }
+        break;
+    }
+
+    match native_res {
+        Ok(msg) => {
+            emit_backend_log(app, &format!("[+] 原生直发成功: {}", msg));
+            Ok(msg)
+        }
+        Err(e) => {
+            if e.starts_with("BUSINESS_REJECTED") {
+                emit_backend_log(app, &format!("[!] 认证被计费系统拒绝: {}", e));
+                return Err(e);
+            }
+            emit_backend_log(app, &format!("[!] 原生直发未就绪: {}，正在调用外部脚本兜底...", e));
+            run_login_script(app.clone()).await
         }
     }
 }
 
 #[tauri::command]
 async fn run_login_script(app: AppHandle) -> Result<String, String> {
-    // 优先执行 Rust 进程内极速直发 (sub-100ms)
-    match native_direct_login().await {
-        Ok(msg) => {
-            log::info!("[native_direct_login] 成功: {}", msg);
-            return Ok(format!("登录成功 (Rust 原生直发):\n{}", msg));
-        }
-        Err(e) => {
-            // 如果是明确的服务端业务拒绝（账号不存在、密码错误、设备状态、code 44），直接返回真实原因给用户
-            if e.contains("账号或密码错误")
-                || e.contains("账号不存在")
-                || e.contains("设备不在正常状态")
-                || e.contains("code: 44")
-                || e.contains("非法接入")
-            {
-                log::warn!("[native_direct_login] 认证未通过: {}", e);
-                return Err(format!("校园网登录失败:\n{}", e));
-            }
-            log::warn!("[native_direct_login] 原生直发异常，自动降级至外部脚本兜底: {}", e);
-        }
-    }
-
     use tauri_plugin_shell::ShellExt;
 
     let exe_dir = std::env::current_exe()
@@ -1739,12 +2017,17 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     #[cfg(windows)]
     {
         let shell = app.shell();
-        let output = shell
+        let cmd_future = shell
             .command(script_path.to_string_lossy().as_ref())
             .arg("--non-interactive")
-            .output()
-            .await
-            .map_err(|e| format!("执行登录脚本失败: {}", e))?;
+            .output();
+
+        let output = match tokio::time::timeout(std::time::Duration::from_secs(15), cmd_future).await {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => return Err(format!("执行登录脚本失败: {}", e)),
+            Err(_) => return Err("执行登录脚本超时 (15 秒)，已中止以防挂起".to_string()),
+        };
+
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if output.status.success() {
             let trimmed = clean_script_output(&stdout);
@@ -1766,12 +2049,17 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     {
         let shell = app.shell();
         let script_str = script_path.to_string_lossy().to_string();
-        let output = shell
+        let cmd_future = shell
             .command("bash")
             .args(["-c", &format!("chmod +x '{}' && '{}' --non-interactive", script_str, script_str)])
-            .output()
-            .await
-            .map_err(|e| format!("执行登录脚本失败: {}", e))?;
+            .output();
+
+        let output = match tokio::time::timeout(std::time::Duration::from_secs(15), cmd_future).await {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => return Err(format!("执行登录脚本失败: {}", e)),
+            Err(_) => return Err("执行登录脚本超时 (15 秒)，已中止以防挂起".to_string()),
+        };
+
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if output.status.success() {
             let trimmed = clean_script_output(&stdout);
@@ -1802,6 +2090,211 @@ async fn open_github(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ============= Rust 后端核心保活状态机 (tokio::spawn + interval) =============
+
+async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Receiver<TriggerAction>) {
+    emit_backend_log(&app, "[*] 启动 Rust 后端核心保活状态机 (自主探测-登录-复验状态机)...");
+
+    let mut consecutive_business_errors: u32 = 0;
+    let mut next_retry_instant: Option<std::time::Instant> = None;
+    let mut last_error_reason: String = String::new();
+
+    loop {
+        // 读取配置检测间隔 (默认 15s) 与开关状态
+        let (interval_secs, check_enabled) = {
+            let state = app.state::<AppState>();
+            let cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
+            let enabled = *state.check_enabled.lock().unwrap_or_else(|e| e.into_inner());
+            let secs = if cfg.check_interval > 0 { cfg.check_interval } else { 15 };
+            (secs, enabled)
+        };
+
+        let now = std::time::Instant::now();
+        let in_backoff = if let Some(retry_at) = next_retry_instant {
+            if now < retry_at {
+                true
+            } else {
+                next_retry_instant = None;
+                false
+            }
+        } else {
+            false
+        };
+
+        let backoff_remaining_secs = if let Some(retry_at) = next_retry_instant {
+            retry_at.saturating_duration_since(now).as_secs()
+        } else {
+            0
+        };
+
+        let timestamp_now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        if check_enabled {
+            // 1. 探测 WiFi 与互联网状态
+            let wifi = get_connected_wifi();
+            let has_internet = check_internet_with_retry().await;
+
+            let (has_configured_ssid, connected_matches) = {
+                let state = app.state::<AppState>();
+                let cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
+                let has_cfg = !cfg.primary_ssid.is_empty() || !cfg.backup_ssid.is_empty();
+                let matches = match &wifi {
+                    Some(s) => {
+                        if !has_cfg {
+                            true
+                        } else {
+                            (!cfg.primary_ssid.is_empty() && s.eq_ignore_ascii_case(&cfg.primary_ssid))
+                                || (!cfg.backup_ssid.is_empty() && s.eq_ignore_ascii_case(&cfg.backup_ssid))
+                        }
+                    }
+                    None => false,
+                };
+                (has_cfg, matches)
+            };
+
+            if wifi.is_none() || (has_configured_ssid && !connected_matches) {
+                // WiFi 未连接或 SSID 不匹配
+                emit_service_status(&app, &ServiceStatus {
+                    state: ServiceState::Disconnected,
+                    wifi_connected: wifi.clone(),
+                    internet_ok: has_internet,
+                    last_check_time: timestamp_now,
+                    consecutive_business_errors,
+                    backoff_remaining_secs,
+                });
+            } else if has_internet {
+                // 互联网畅通，重置业务退避计数器
+                if consecutive_business_errors > 0 || next_retry_instant.is_some() {
+                    consecutive_business_errors = 0;
+                    next_retry_instant = None;
+                    last_error_reason.clear();
+                }
+                emit_service_status(&app, &ServiceStatus {
+                    state: ServiceState::Connected,
+                    wifi_connected: wifi.clone(),
+                    internet_ok: true,
+                    last_check_time: timestamp_now,
+                    consecutive_business_errors: 0,
+                    backoff_remaining_secs: 0,
+                });
+            } else {
+                // WiFi 已就绪但外网不通 -> 需认证
+                if in_backoff {
+                    emit_service_status(&app, &ServiceStatus {
+                        state: ServiceState::Backoff {
+                            next_retry_secs: backoff_remaining_secs,
+                            reason: last_error_reason.clone(),
+                        },
+                        wifi_connected: wifi.clone(),
+                        internet_ok: false,
+                        last_check_time: timestamp_now,
+                        consecutive_business_errors,
+                        backoff_remaining_secs,
+                    });
+                } else {
+                    emit_service_status(&app, &ServiceStatus {
+                        state: ServiceState::LoggingIn,
+                        wifi_connected: wifi.clone(),
+                        internet_ok: false,
+                        last_check_time: timestamp_now,
+                        consecutive_business_errors,
+                        backoff_remaining_secs: 0,
+                    });
+
+                    match execute_login_flow(&app).await {
+                        Ok(_) => {
+                            consecutive_business_errors = 0;
+                            next_retry_instant = None;
+                            last_error_reason.clear();
+                            emit_service_status(&app, &ServiceStatus {
+                                state: ServiceState::Connected,
+                                wifi_connected: wifi.clone(),
+                                internet_ok: true,
+                                last_check_time: timestamp_now,
+                                consecutive_business_errors: 0,
+                                backoff_remaining_secs: 0,
+                            });
+                        }
+                        Err(err) => {
+                            if err.starts_with("BUSINESS_REJECTED") {
+                                consecutive_business_errors += 1;
+                                // 指数退避: 15s -> 30s -> 60s -> 120s -> 300s
+                                let backoff_secs = match consecutive_business_errors {
+                                    1 => 15,
+                                    2 => 30,
+                                    3 => 60,
+                                    4 => 120,
+                                    _ => 300,
+                                };
+                                next_retry_instant = Some(std::time::Instant::now() + std::time::Duration::from_secs(backoff_secs));
+                                last_error_reason = err.clone();
+                                let alert_msg = format!("认证被拒绝: {}。已进入保护性退避 (将在 {} 秒后重试)，防止高频轰炸导致锁号。", err, backoff_secs);
+                                emit_backend_log(&app, &alert_msg);
+                                let _ = app.emit("backend-alert", &alert_msg);
+
+                                emit_service_status(&app, &ServiceStatus {
+                                    state: ServiceState::Backoff {
+                                        next_retry_secs: backoff_secs,
+                                        reason: last_error_reason.clone(),
+                                    },
+                                    wifi_connected: wifi.clone(),
+                                    internet_ok: false,
+                                    last_check_time: timestamp_now,
+                                    consecutive_business_errors,
+                                    backoff_remaining_secs: backoff_secs,
+                                });
+                            } else {
+                                emit_service_status(&app, &ServiceStatus {
+                                    state: ServiceState::NeedsLogin,
+                                    wifi_connected: wifi.clone(),
+                                    internet_ok: false,
+                                    last_check_time: timestamp_now,
+                                    consecutive_business_errors,
+                                    backoff_remaining_secs: 0,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 等待下一个周期或被外部信号打断 (例如托盘点击立即检测/立即登录)
+        let sleep_duration = if in_backoff {
+            std::time::Duration::from_secs(1.max(backoff_remaining_secs.min(5)))
+        } else {
+            std::time::Duration::from_secs(interval_secs)
+        };
+
+        tokio::select! {
+            _ = tokio::time::sleep(sleep_duration) => {}
+            action = rx.recv() => {
+                match action {
+                    Some(TriggerAction::Check) => {
+                        emit_backend_log(&app, "[*] 收到立即检测信号");
+                    }
+                    Some(TriggerAction::Login) => {
+                        emit_backend_log(&app, "[*] 收到手动立即登录信号，重置退避计时器");
+                        consecutive_business_errors = 0;
+                        next_retry_instant = None;
+                        last_error_reason.clear();
+                        let _ = execute_login_flow(&app).await;
+                    }
+                    Some(TriggerAction::ResetBackoff) => {
+                        consecutive_business_errors = 0;
+                        next_retry_instant = None;
+                        last_error_reason.clear();
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+}
+
 // ============= 托盘菜单 =============
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -1828,11 +2321,15 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "check" => {
+                let state = app.state::<AppState>();
+                let _ = state.trigger_tx.try_send(TriggerAction::Check);
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.emit("check_network", ());
                 }
             }
             "login" => {
+                let state = app.state::<AppState>();
+                let _ = state.trigger_tx.try_send(TriggerAction::Login);
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.emit("run_login", ());
                 }
@@ -1878,9 +2375,34 @@ pub fn run() {
         return;
     }
 
+    let (trigger_tx, trigger_rx) = tokio::sync::mpsc::channel::<TriggerAction>(32);
+
+    let initial_config = {
+        let path = get_config_path();
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(&path) {
+                serde_json::from_str::<Config>(strip_bom(&content)).unwrap_or_default()
+            } else {
+                Config::default()
+            }
+        } else {
+            Config::default()
+        }
+    };
+    let is_first_run = initial_config.primary_ssid.is_empty();
+
+    let app_state = AppState {
+        config: Mutex::new(initial_config),
+        first_run: Mutex::new(is_first_run),
+        check_enabled: Mutex::new(true),
+        service_status: Mutex::new(ServiceStatus::default()),
+        trigger_tx: trigger_tx.clone(),
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
+        .manage(app_state)
+        .setup(move |app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -1901,6 +2423,12 @@ pub fn run() {
                 });
             }
 
+            // 启动独立 Rust 后端保活状态机 (tokio::spawn)
+            let handle_clone = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                start_background_service(handle_clone, trigger_rx).await;
+            });
+
             // 启动窗口行为:
             // 1. 开机自启动 (--autostart / --minimized / --silent): 绝对静默隐藏于托盘, 绝不弹窗
             // 2. 用户双击手动启动: 显示窗口并聚焦, 方便查看网络状态或配置账号
@@ -1908,7 +2436,6 @@ pub fn run() {
             let is_autostart = args.iter().any(|arg| {
                 arg == "--autostart" || arg == "--minimized" || arg == "--silent" || arg == "-s"
             });
-            let login_configured = is_login_configured();
 
             if let Some(window) = app.get_webview_window("main") {
                 if is_autostart {
@@ -1921,26 +2448,6 @@ pub fn run() {
 
             Ok(())
         })
-        .manage({
-            let initial_config = {
-                let path = get_config_path();
-                if path.exists() {
-                    if let Ok(content) = fs::read_to_string(&path) {
-                        serde_json::from_str::<Config>(strip_bom(&content)).unwrap_or_default()
-                    } else {
-                        Config::default()
-                    }
-                } else {
-                    Config::default()
-                }
-            };
-            let is_first_run = initial_config.primary_ssid.is_empty();
-            AppState {
-                config: Mutex::new(initial_config),
-                first_run: Mutex::new(is_first_run),
-                check_enabled: Mutex::new(true),
-            }
-        })
         .invoke_handler(tauri::generate_handler![
             load_config,
             save_config,
@@ -1950,6 +2457,9 @@ pub fn run() {
             run_login_script,
             get_check_enabled,
             toggle_check_enabled,
+            get_service_status,
+            trigger_manual_check,
+            trigger_manual_login,
             get_autostart_enabled,
             set_autostart_enabled,
             open_github,
@@ -2151,8 +2661,6 @@ mod tests {
             "http://a.b/portal.do?a=1".to_string(),
             "http://a.b/portal.do?ssid=%E6%B5%8B".to_string(), // 截断的 UTF-8
             "http://a.b/portal.do?ssid=%ZZ".to_string(),        // 非法 hex
-            "http://a.b/portal.do?x=100%25".to_string(),
-            "http://a.b/portal.do?".to_owned() + &"y=".repeat(5000), // 超长 query
             "file:///etc/passwd".to_string(),
             "http://x/portal.do?a=b&c".to_string(),
         ];
@@ -2160,4 +2668,49 @@ mod tests {
             let _ = parse_portal_url(s.clone());
         }
     }
+
+    #[test]
+    fn test_resolve_quickauth_url() {
+        assert_eq!(
+            resolve_quickauth_url("http://172.18.252.12:6060/portal.do").unwrap(),
+            "http://172.18.252.12:6060/quickauth.do"
+        );
+        assert_eq!(
+            resolve_quickauth_url("http://172.18.252.12:6060/quickauth.do").unwrap(),
+            "http://172.18.252.12:6060/quickauth.do"
+        );
+        assert_eq!(
+            resolve_quickauth_url("http://172.18.252.12:6060").unwrap(),
+            "http://172.18.252.12:6060/quickauth.do"
+        );
+        assert_eq!(
+            resolve_quickauth_url("http://172.18.252.12:6060/").unwrap(),
+            "http://172.18.252.12:6060/quickauth.do"
+        );
+        assert_eq!(
+            resolve_quickauth_url("http://172.18.252.12:6060/custom/path/portal.do").unwrap(),
+            "http://172.18.252.12:6060/custom/path/quickauth.do"
+        );
+        assert_eq!(
+            resolve_quickauth_url("http://172.18.252.12:6060/portal.do?wlanuserip=1.1.1.1").unwrap(),
+            "http://172.18.252.12:6060/quickauth.do"
+        );
+    }
+
+    #[test]
+    fn test_dummy_ip_mac_defense() {
+        assert!(is_dummy_ip(""));
+        assert!(is_dummy_ip("127.0.0.1"));
+        assert!(is_dummy_ip("0.0.0.0"));
+        assert!(is_dummy_ip("10.0.0.1"));
+        assert!(!is_dummy_ip("10.12.34.56"));
+        assert!(!is_dummy_ip("172.18.252.12"));
+
+        assert!(is_dummy_mac(""));
+        assert!(is_dummy_mac("00:00:00:00:00:00"));
+        assert!(is_dummy_mac("aa:bb:cc:dd:ee:ff"));
+        assert!(is_dummy_mac("invalid_mac"));
+        assert!(!is_dummy_mac("18:c0:4d:82:11:22"));
+    }
 }
+

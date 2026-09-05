@@ -612,7 +612,7 @@ function Invoke-CampusLogin {
             "Accept-Language" = "zh-CN,zh;q=0.9,en;q=0.8"
             "Referer" = $cleanBase
         }
-        $response = Invoke-WebRequest -Uri $requestUrl -Method Get -Headers $browserHeaders -UseBasicParsing -TimeoutSec 6 -ErrorAction Stop -Proxy $null
+        $response = Invoke-WebRequest -Uri $requestUrl -Method Get -Headers $browserHeaders -UseBasicParsing -TimeoutSec 6 -ErrorAction Stop -Proxy $null -MaximumRedirection 0
         $body = $response.Content
         $sendSource = "PowerShell (Invoke-WebRequest)"
         Write-Host "    [L1] 成功 ($($body.Length) 字符)" -ForegroundColor Green
@@ -757,8 +757,8 @@ function Invoke-CampusLogin {
         if ($body -match '"message"\s*:\s*"([^"]*)"') { $respMsg = $Matches[1] }
     }
 
-    # 判定结果
-    if ($respCode -eq "0" -or $body -match "success" -or $body -match "认证成功") {
+    # 判定结果 (严格收口: 仅认 JSON code == "0")
+    if ($respCode -eq "0") {
         # 成功: 打印摘要
         Write-Host "    发送层: $sendSource  code=$respCode  msg=$respMsg" -ForegroundColor Cyan
         Write-Host "[步骤 5/5] 完成" -ForegroundColor Green
