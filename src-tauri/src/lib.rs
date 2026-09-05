@@ -393,6 +393,13 @@ fn save_login_profile(mut profile: LoginProfile, password: String) -> Result<(),
     Ok(())
 }
 
+fn save_login_profile_json(profile: &LoginProfile) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(profile)
+        .map_err(|e| format!("序列化登录配置失败: {}", e))?;
+    fs::write(get_login_profile_path(), json)
+        .map_err(|e| format!("写入登录配置失败: {}", e))
+}
+
 /// 解析 portal.do 重定向 URL (替代旧 PS 端的 TryAutoDetectParams)
 /// 用户从浏览器复制粘贴的 URL 进来,我们用跟 PS 端 RedirectUrlParser 一样的正则解析。
 #[tauri::command]
@@ -708,7 +715,7 @@ impl Default for ServiceStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerAction {
     Check,
     Login,
@@ -1219,7 +1226,7 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
                 let _ = fs::remove_file(&self.0);
             }
         }
-        let guard = TempFileGuard(profile_path.clone());
+        let _guard = TempFileGuard(profile_path.clone());
         let profile_path_str = profile_path.to_string_lossy().to_string();
 
         // 写文件
@@ -1837,7 +1844,7 @@ async fn native_direct_login() -> Result<String, String> {
     // 1. 登录前置强制取参：先发一次禁重定向的 HTTP 探测，302 就解析 Location 动态刷新参数
     if let Ok(Some(sniffed)) = sniff_portal_params().await {
         if apply_sniffed_params_to_profile(&mut profile, &sniffed) {
-            let _ = save_login_profile(profile.clone());
+            let _ = save_login_profile_json(&profile);
         }
     }
 
@@ -2007,7 +2014,7 @@ async fn execute_login_flow(app: &AppHandle) -> Result<String, String> {
                         if apply_sniffed_params_to_profile(&mut profile, &sniffed) {
                             emit_backend_log(app, &format!("[*] 已根据 302 刷新权威参数: IP={:?}, MAC={:?}, VLAN={:?}",
                                 sniffed.wlan_user_ip, sniffed.mac_address, sniffed.vlan));
-                            let _ = save_login_profile(profile);
+                            let _ = save_login_profile_json(&profile);
                         }
                     }
                 }
@@ -2036,8 +2043,6 @@ async fn execute_login_flow(app: &AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 async fn run_login_script(app: AppHandle) -> Result<String, String> {
-    use tauri_plugin_shell::ShellExt;
-
     let exe_dir = std::env::current_exe()
         .map(|p| p.parent().unwrap_or(std::path::Path::new(".")).to_path_buf())
         .unwrap_or_else(|_| PathBuf::from("."));
@@ -2113,6 +2118,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
 
     #[cfg(not(windows))]
     {
+        use tauri_plugin_shell::ShellExt;
         let shell = app.shell();
         let script_str = script_path.to_string_lossy().to_string();
         let cmd_future = shell
