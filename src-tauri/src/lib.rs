@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -527,14 +527,16 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
     Ok(parsed)
 }
 
-/// 用已保存的 profile 直接执行登录 (与 run_login_script 等价)
+/// 用已保存的 profile 直接执行登录 (接入统一互斥认证流水线)
 #[tauri::command]
 async fn run_login_with_profile(app: AppHandle) -> Result<String, String> {
     if !is_login_configured() {
         return Err("尚未配置校园网账号,请先在主页或网络配置页填写".to_string());
     }
-    // 直接复用现有的 run_login_script 内部逻辑
-    run_login_script(app).await
+    let state = app.state::<AppState>();
+    let _guard = state.is_logging_in.try_lock()
+        .map_err(|_| "当前已有认证流程正在执行，请勿重复操作".to_string())?;
+    execute_login_flow(&app).await
 }
 
 // ============= DPAPI 密码加密 =============
@@ -672,7 +674,7 @@ fn operator_short_to_name(code: &str) -> &'static str {
 // ============= 全局状态与服务状态机 =============
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data")]
+#[serde(tag = "type")]
 pub enum ServiceState {
     Idle,
     Checking,
@@ -719,6 +721,8 @@ pub struct AppState {
     pub check_enabled: Mutex<bool>,
     pub service_status: Mutex<ServiceStatus>,
     pub trigger_tx: tokio::sync::mpsc::Sender<TriggerAction>,
+    pub is_logging_in: Arc<tokio::sync::Mutex<()>>,
+    pub last_manual_login: Mutex<std::time::Instant>,
 }
 
 // ============= Tauri 命令 =============
@@ -747,6 +751,13 @@ fn trigger_manual_check(state: tauri::State<'_, AppState>) -> Result<(), String>
 
 #[tauri::command]
 fn trigger_manual_login(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // 频控节流：限制 3 秒内最多触发一次手动认证，防止连点排队轰炸网关
+    let mut last = state.last_manual_login.lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    if now.duration_since(*last) < std::time::Duration::from_secs(3) {
+        return Err("操作过于频繁，请稍候再试 (最少间隔 3 秒)".to_string());
+    }
+    *last = now;
     state.trigger_tx.try_send(TriggerAction::Login).map_err(|e| format!("触发登录失败: {}", e))
 }
 
@@ -864,6 +875,12 @@ async fn set_hotspot_keepalive(enabled: bool, state: tauri::State<'_, AppState>)
 async fn check_and_keep_hotspot_alive() -> Result<String, String> {
     #[cfg(windows)]
     {
+        static HOTSPOT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let _guard = match HOTSPOT_LOCK.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok("BUSY:CheckInProgress".to_string()),
+        };
+
         let script = r#"
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $asTaskGeneric = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }
@@ -924,10 +941,17 @@ try {
     Write-Output "ERR:$($_.Exception.Message)"
 }
 "#;
-        let output = hidden_command("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
-            .output()
-            .map_err(|e| format!("调用移动热点保活失败: {}", e))?;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let mut cmd = tokio::process::Command::new("powershell");
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.kill_on_drop(true);
+        cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script]);
+
+        let output = match tokio::time::timeout(std::time::Duration::from_secs(12), cmd.output()).await {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => return Err(format!("调用移动热点保活失败: {}", e)),
+            Err(_) => return Err("移动热点保活执行超时 (12 秒)，已中止".to_string()),
+        };
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         if !stdout.is_empty() {
@@ -1306,6 +1330,10 @@ fn get_connected_wifi() -> Option<String> {
     }
 }
 
+async fn get_connected_wifi_async() -> Option<String> {
+    tokio::task::spawn_blocking(get_connected_wifi).await.unwrap_or(None)
+}
+
 // ============= 检测互联网连接 =============
 
 async fn check_internet() -> bool {
@@ -1470,6 +1498,40 @@ async fn sniff_portal_params() -> Result<Option<SniffedParams>, String> {
     Ok(None)
 }
 
+/// 校验 Portal Base URL 是否合法有效（防广告劫持与污染配置）
+pub fn is_valid_portal_base_url(url_str: &str) -> bool {
+    let t = url_str.trim();
+    if t.is_empty() {
+        return false;
+    }
+    let parsed = match url::Url::parse(t) {
+        Ok(u) => u,
+        Err(_) => return false,
+    };
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return false;
+    }
+    let host = match parsed.host_str() {
+        Some(h) => h.to_lowercase(),
+        None => return false,
+    };
+    // 排除探测端点自身与常见外部域或运营商劫持广告域
+    if host.contains("miui.com")
+        || host.contains("hicloud.com")
+        || host.contains("1.1.1.1")
+        || host.contains("qq.com")
+        || host.contains("baidu.com")
+        || host.contains("bing.com")
+        || host.contains("msftconnecttest.com")
+        || host.contains("apple.com")
+    {
+        return false;
+    }
+    // 路径检查：必须是合法的 portal 路径 (包含 portal, quickauth 或以 .do 结尾)
+    let path = parsed.path().to_lowercase();
+    path.contains("portal") || path.contains("quickauth") || path.ends_with(".do") || path.contains("eportal")
+}
+
 /// 将嗅探到的参数安全同步回登录配置
 fn apply_sniffed_params_to_profile(profile: &mut LoginProfile, sniffed: &SniffedParams) -> bool {
     let mut changed = false;
@@ -1504,7 +1566,7 @@ fn apply_sniffed_params_to_profile(profile: &mut LoginProfile, sniffed: &Sniffed
         }
     }
     if let Some(base) = &sniffed.base_url {
-        if !base.trim().is_empty() && profile.base_url != *base {
+        if is_valid_portal_base_url(base) && profile.base_url != *base {
             profile.base_url = base.clone();
             changed = true;
         }
@@ -1751,6 +1813,10 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
     }
 }
 
+async fn get_wlan_network_info_async() -> (Option<String>, Option<String>, Option<String>) {
+    tokio::task::spawn_blocking(get_wlan_network_info).await.unwrap_or((None, None, None))
+}
+
 /// 进程内异步直发认证请求 (零外部脚本依赖，毫秒级响应)
 async fn native_direct_login() -> Result<String, String> {
     let mut profile = get_login_profile()?;
@@ -1776,7 +1842,7 @@ async fn native_direct_login() -> Result<String, String> {
     }
 
     // 2. 提取或自动获取网络硬件信息 (IP, MAC, SSID)
-    let (detected_ssid, detected_mac, detected_ip) = get_wlan_network_info();
+    let (detected_ssid, detected_mac, detected_ip) = get_wlan_network_info_async().await;
 
     // 彻底删除硬编码 SSID，完全采用用户配置或当前连接的真实 SSID
     let ssid = if !profile.ssid.trim().is_empty() {
@@ -2016,13 +2082,13 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
 
     #[cfg(windows)]
     {
-        let shell = app.shell();
-        let cmd_future = shell
-            .command(script_path.to_string_lossy().as_ref())
-            .arg("--non-interactive")
-            .output();
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let mut cmd = tokio::process::Command::new(&script_path);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.kill_on_drop(true);
+        cmd.arg("--non-interactive");
 
-        let output = match tokio::time::timeout(std::time::Duration::from_secs(15), cmd_future).await {
+        let output = match tokio::time::timeout(std::time::Duration::from_secs(15), cmd.output()).await {
             Ok(Ok(out)) => out,
             Ok(Err(e)) => return Err(format!("执行登录脚本失败: {}", e)),
             Err(_) => return Err("执行登录脚本超时 (15 秒)，已中止以防挂起".to_string()),
@@ -2134,7 +2200,7 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
 
         if check_enabled {
             // 1. 探测 WiFi 与互联网状态
-            let wifi = get_connected_wifi();
+            let wifi = get_connected_wifi_async().await;
             let has_internet = check_internet_with_retry().await;
 
             let (has_configured_ssid, connected_matches) = {
@@ -2204,7 +2270,13 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                         backoff_remaining_secs: 0,
                     });
 
-                    match execute_login_flow(&app).await {
+                    let login_res = {
+                        let state = app.state::<AppState>();
+                        let _guard = state.is_logging_in.lock().await;
+                        execute_login_flow(&app).await
+                    };
+
+                    match login_res {
                         Ok(_) => {
                             consecutive_business_errors = 0;
                             next_retry_instant = None;
@@ -2281,6 +2353,14 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                         consecutive_business_errors = 0;
                         next_retry_instant = None;
                         last_error_reason.clear();
+                        // 消费积压的重复登录信号，防止排队并发
+                        while let Ok(action) = rx.try_recv() {
+                            if action != TriggerAction::Login {
+                                // 暂存或其它信号
+                            }
+                        }
+                        let state = app.state::<AppState>();
+                        let _guard = state.is_logging_in.lock().await;
                         let _ = execute_login_flow(&app).await;
                     }
                     Some(TriggerAction::ResetBackoff) => {
@@ -2397,6 +2477,8 @@ pub fn run() {
         check_enabled: Mutex::new(true),
         service_status: Mutex::new(ServiceStatus::default()),
         trigger_tx: trigger_tx.clone(),
+        is_logging_in: Arc::new(tokio::sync::Mutex::new(())),
+        last_manual_login: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(10)),
     };
 
     tauri::Builder::default()
@@ -2711,6 +2793,24 @@ mod tests {
         assert!(is_dummy_mac("aa:bb:cc:dd:ee:ff"));
         assert!(is_dummy_mac("invalid_mac"));
         assert!(!is_dummy_mac("18:c0:4d:82:11:22"));
+    }
+
+    #[test]
+    fn test_valid_portal_base_url() {
+        // 合法 Portal Base URL
+        assert!(is_valid_portal_base_url("http://172.18.252.12:6060/portal.do"));
+        assert!(is_valid_portal_base_url("http://10.1.1.1/eportal/index.do"));
+        assert!(is_valid_portal_base_url("http://172.18.252.12/quickauth.do"));
+        assert!(is_valid_portal_base_url("https://portal.xxgc.edu.cn/portal.do"));
+
+        // 广告/公网劫持/外网探测端点（严防覆盖污染用户配置）
+        assert!(!is_valid_portal_base_url("http://connect.rom.miui.com/generate_204"));
+        assert!(!is_valid_portal_base_url("http://connectivitycheck.platform.hicloud.com/generate_204"));
+        assert!(!is_valid_portal_base_url("http://1.1.1.1"));
+        assert!(!is_valid_portal_base_url("http://www.baidu.com"));
+        assert!(!is_valid_portal_base_url("http://ad.carrier.com/ads.html"));
+        assert!(!is_valid_portal_base_url(""));
+        assert!(!is_valid_portal_base_url("ftp://172.18.252.12/portal.do"));
     }
 }
 

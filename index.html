@@ -884,7 +884,7 @@
             <div class="app-brand">
                 <div class="app-logo-badge">📶</div>
                 <div class="app-title-group">
-                    <h1>校园网助手 <span class="app-ver-pill">v2.2.3</span></h1>
+                    <h1>校园网助手 <span class="app-ver-pill">v2.2.4</span></h1>
                 </div>
             </div>
             <button class="header-btn" onclick="showSetup()">
@@ -1232,6 +1232,8 @@
         };
 
         let currentBackendStatus = null;
+        let hotspotCheckIntervalId = null;
+        let isCheckingHotspot = false;
 
         function handleBackendStatusChanged(status) {
             if (!status) return;
@@ -1251,8 +1253,14 @@
                 gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected', 'state-checking');
             }
 
-            const state = status.state;
-            if (state === 'Connected') {
+            // Rust serde #[serde(tag = "type")] 序列化为:
+            // {"type":"Connected"} 或 {"type":"Backoff","next_retry_secs":15,"reason":"..."}
+            const stateObj = status.state;
+            const stateType = typeof stateObj === 'string'
+                ? stateObj
+                : (stateObj && stateObj.type ? stateObj.type : 'Disconnected');
+
+            if (stateType === 'Connected') {
                 if (gauge) gauge.classList.add('state-connected');
                 if (icon) icon.textContent = '✓';
                 if (text) {
@@ -1260,7 +1268,7 @@
                     text.className = 'status-text';
                 }
                 if (detail) detail.textContent = '校园网畅通 · Rust 后端全天候自动保活中';
-            } else if (state === 'LoggingIn') {
+            } else if (stateType === 'LoggingIn') {
                 if (gauge) gauge.classList.add('state-checking');
                 if (icon) icon.textContent = '⏳';
                 if (text) {
@@ -1268,18 +1276,21 @@
                     text.className = 'status-text';
                 }
                 if (detail) detail.textContent = 'Rust 原生直发认证中，校验 204 放行...';
-            } else if (typeof state === 'object' && state.Backoff) {
+            } else if (stateType === 'Backoff') {
                 if (gauge) gauge.classList.add('state-needs-login');
                 if (icon) icon.textContent = '⚠️';
-                const secs = status.backoff_remaining_secs || state.Backoff.next_retry_secs || 0;
+                const secs = (status.backoff_remaining_secs !== undefined && status.backoff_remaining_secs !== null)
+                    ? status.backoff_remaining_secs
+                    : (stateObj && stateObj.next_retry_secs ? stateObj.next_retry_secs : 0);
+                const reason = (stateObj && stateObj.reason) || '账号或密码错误';
                 if (text) {
                     text.textContent = `保护性退避等待 (${secs}s)`;
                     text.className = 'status-text';
                 }
                 if (detail) {
-                    detail.textContent = `认证拒绝: ${state.Backoff.reason || '账号或密码错误'}，暂停高频重试以防锁号`;
+                    detail.textContent = `认证拒绝: ${reason}，暂停高频重试以防锁号`;
                 }
-            } else if (state === 'NeedsLogin') {
+            } else if (stateType === 'NeedsLogin') {
                 if (gauge) gauge.classList.add('state-needs-login');
                 if (icon) icon.textContent = '🔐';
                 if (text) {
@@ -1287,6 +1298,14 @@
                     text.className = 'status-text';
                 }
                 if (detail) detail.textContent = `已连接「${status.wifi_connected || ''}」，待后端自动认证`;
+            } else if (stateType === 'Checking') {
+                if (gauge) gauge.classList.add('state-checking');
+                if (icon) icon.textContent = '⏳';
+                if (text) {
+                    text.textContent = '正在探测网络...';
+                    text.className = 'status-text';
+                }
+                if (detail) detail.textContent = 'Rust 后端状态机探测中...';
             } else {
                 if (gauge) gauge.classList.add('state-disconnected');
                 if (icon) icon.textContent = '⚡';
@@ -1298,23 +1317,41 @@
             }
         }
         
-        // 启动辅助定时器 (倒计时与热点常开拉起)
+        // 启动辅助定时器 (UI 秒数递减与热点 30 秒独立定时保活)
         function startCheckInterval() {
             if (checkIntervalId) {
                 clearInterval(checkIntervalId);
             }
-            checkIntervalId = setInterval(async () => {
+            checkIntervalId = setInterval(() => {
                 if (currentBackendStatus && currentBackendStatus.backoff_remaining_secs > 0) {
                     currentBackendStatus.backoff_remaining_secs -= 1;
                     const text = document.getElementById('statusText');
-                    if (text && typeof currentBackendStatus.state === 'object' && currentBackendStatus.state.Backoff) {
+                    const stateObj = currentBackendStatus.state;
+                    const stateType = typeof stateObj === 'string' ? stateObj : (stateObj && stateObj.type ? stateObj.type : '');
+                    if (text && stateType === 'Backoff') {
                         text.textContent = `保护性退避等待 (${currentBackendStatus.backoff_remaining_secs}s)`;
                     }
                 }
-                if (hotspotKeepaliveEnabled) {
-                    await runHotspotKeepaliveCheck(false);
-                }
             }, 1000);
+
+            startHotspotInterval();
+        }
+
+        function startHotspotInterval() {
+            if (hotspotCheckIntervalId) {
+                clearInterval(hotspotCheckIntervalId);
+            }
+            // 30 秒轮询间隔，杜绝高频并发占用 tokio / PowerShell 资源
+            hotspotCheckIntervalId = setInterval(async () => {
+                if (hotspotKeepaliveEnabled && !isCheckingHotspot) {
+                    isCheckingHotspot = true;
+                    try {
+                        await runHotspotKeepaliveCheck(false);
+                    } finally {
+                        isCheckingHotspot = false;
+                    }
+                }
+            }, 30000);
         }
         
         // 切换自动检测
@@ -1351,12 +1388,25 @@
                 checkbox.checked = hotspotKeepaliveEnabled;
                 addLog(hotspotKeepaliveEnabled ? '[+] 已开启保持移动热点开启（自动防休眠拉起）' : '[-] 已关闭保持移动热点开启');
                 if (hotspotKeepaliveEnabled) {
-                    addLog('正在检查并激活 Windows 移动热点...');
-                    const res = await invoke('check_and_keep_hotspot_alive');
-                    if (res && res.includes('STARTED:Success')) {
-                        addLog('[+] 移动热点已激活拉起开启');
-                    } else if (res && res.includes('ACTIVE:On')) {
-                        addLog('[+] 移动热点当前已处于开启就绪状态');
+                    startHotspotInterval();
+                    if (!isCheckingHotspot) {
+                        isCheckingHotspot = true;
+                        try {
+                            addLog('正在检查并激活 Windows 移动热点...');
+                            const res = await invoke('check_and_keep_hotspot_alive');
+                            if (res && res.includes('STARTED:Success')) {
+                                addLog('[+] 移动热点已激活拉起开启');
+                            } else if (res && res.includes('ACTIVE:On')) {
+                                addLog('[+] 移动热点当前已处于开启就绪状态');
+                            }
+                        } finally {
+                            isCheckingHotspot = false;
+                        }
+                    }
+                } else {
+                    if (hotspotCheckIntervalId) {
+                        clearInterval(hotspotCheckIntervalId);
+                        hotspotCheckIntervalId = null;
                     }
                 }
             } catch (e) {
