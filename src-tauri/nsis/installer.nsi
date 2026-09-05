@@ -6,7 +6,11 @@
   ; 1. 复制生成中文主执行文件：新乡工程校园网保活.exe
   CopyFiles /SILENT "$INSTDIR\xxgcxy-wifi.exe" "$INSTDIR\新乡工程校园网保活.exe"
 
-  ; 2. 清理安装向导默认生成的英文快捷方式
+  ; 2. 关键防御：将 NoShortcutMode 设为 1，阻断完成页 (FinishPage) 自动回调 CreateOrUpdateDesktopShortcut
+  ;    彻底杜绝点击“完成”时再次生成英文的 $DESKTOP\xxgcxy-wifi.lnk
+  StrCpy $NoShortcutMode 1
+
+  ; 3. 清理安装向导默认生成的英文快捷方式（静默模式或旧版本残留）
   Delete "$DESKTOP\xxgcxy-wifi.lnk"
   Delete "$SMPROGRAMS\xxgcxy-wifi.lnk"
   Delete "$SMPROGRAMS\xxgcxy-wifi\xxgcxy-wifi.lnk"
