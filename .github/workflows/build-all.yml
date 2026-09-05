@@ -112,28 +112,29 @@ jobs:
 
       - name: Create Linux packages
         run: |
-          APP_VERSION="2.0.4"
+          APP_VERSION=$(node -p "require('./package.json').version")
           mkdir -p release/linux
 
           # Copy deb package
           cp src-tauri/target/release/bundle/deb/*.deb release/linux/
 
           # Create tar.gz package
-          BINARY_NAME="xxgcxy-wifi"
-          TAR_DIR="xxgcxy-wifi-v${APP_VERSION}-linux-x64"
+          TAR_DIR="campus-wifi-helper-v${APP_VERSION}-linux-x64"
           mkdir -p "release/linux/${TAR_DIR}"
 
           # Copy binary and scripts
-          if [ -f "src-tauri/target/release/${BINARY_NAME}" ]; then
-            cp "src-tauri/target/release/${BINARY_NAME}" "release/linux/${TAR_DIR}/"
-          fi
+          for b in campus-wifi-helper xxgcxy-wifi; do
+            if [ -f "src-tauri/target/release/${b}" ]; then
+              cp "src-tauri/target/release/${b}" "release/linux/${TAR_DIR}/"
+            fi
+          done
           # Copy shell script
           cp xywdl.sh "release/linux/${TAR_DIR}/"
           chmod +x "release/linux/${TAR_DIR}/xywdl.sh"
 
           # Create tar.gz
           cd release/linux
-          tar -czf "xxgcxy-wifi-v${APP_VERSION}-x86_64-linux.tar.gz" "${TAR_DIR}/"
+          tar -czf "campus-wifi-helper-v${APP_VERSION}-x86_64-linux.tar.gz" "${TAR_DIR}/"
           rm -rf "${TAR_DIR}"
           cd ../..
 
@@ -202,6 +203,21 @@ jobs:
     needs: [build-windows, build-linux, build-standalone-sh]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve Tag and Version
+        id: vars
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG_NAME="${{ github.ref_name }}"
+          else
+            TAG_NAME="v${VERSION}"
+          fi
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
       - name: Download Windows NSIS
         uses: actions/download-artifact@v4
         with:
@@ -246,11 +262,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.9
-          name: v2.0.9 - 校园网自动登录助手
+          tag_name: ${{ steps.vars.outputs.tag_name }}
+          name: ${{ steps.vars.outputs.tag_name }} - 校园网自动登录助手
           make_latest: true
           body: |
-            v2.0.9 - 校园网自动登录助手
+            ${{ steps.vars.outputs.tag_name }} - 校园网自动登录助手
 
             ## 系统要求
 
@@ -261,47 +277,21 @@ jobs:
             ## 下载
 
             **Windows (系统 PowerShell 5.1+, 体积小)**
-            - `xxgcxy-wifi_2.0.9_x64-setup.exe` - NSIS installer (~5 MB)
-            - `xxgcxy-wifi_2.0.9_x64_zh-CN.msi` - MSI installer (~6 MB)
+            - `campus-wifi-helper_${{ steps.vars.outputs.version }}_x64-setup.exe` - NSIS 安装包 (~5 MB)
+            - `campus-wifi-helper_${{ steps.vars.outputs.version }}_x64_zh-CN.msi` - MSI 安装包 (~6 MB)
 
             **Linux**
-            - `xxgcxy-wifi_2.0.9_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v2.0.9-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-2.0.9-1.x86_64.rpm` - RPM package (converted from deb)
+            - `campus-wifi-helper_${{ steps.vars.outputs.version }}_amd64.deb` - Debian/Ubuntu 软件包
+            - `campus-wifi-helper-v${{ steps.vars.outputs.version }}-x86_64-linux.tar.gz` - 通用 Linux 压缩包
+            - `campus-wifi-helper-${{ steps.vars.outputs.version }}-1.x86_64.rpm` - RPM 软件包
 
             **Cross-platform**
-            - `xywdl.sh` - Standalone shell script (Linux/macOS, needs curl or python3)
-
-            ## What's New in v2.0.9
-
-            ### ⚡ 认证极速响应与卡死假死彻底根治 (Speed & Responsiveness)
-            - **模拟主流浏览器标头 (防 AC/WAF 掐线)**: 认证请求（PowerShell / C# / Python 三层）统一注入标准 Chrome 浏览器标头与中文语言环境，彻底解决校园网 AC/WAF 防火墙误判并重置连接（“基础连接已经关闭: 连接被意外关闭” / “Remote end closed connection without response”）的问题，实现与浏览器手动登录相同的秒级连通。
-            - **内网超时从 30s 缩短至 6s**: 针对校园网内网环境，单层超时收紧至 6 秒，彻底消除原三层降级累加长达 90 秒的假死与两分钟无法联网问题。
-            - **解除前端 30 秒全局死锁**: 移除前端登录后粗暴的 30 秒阻塞锁，登录完成立即释放状态，用户点击“立即检测并重连”秒级响应，告别“一分钟没反应一直不动”。
-            - **日志防抖与 SSID 容错**: 消除多重“重连后需要登录校园网...”冗余日志，SSID 匹配全面兼容大小写，心跳定时器智能自适应。
-
-            ## What's New in v2.0.8
-
-            ### 🔥 保持移动热点开启守护 (Hotspot Keep-Alive)
-            - **突破校园网单账号限制**: 针对校园网单设备在线限制，学生使用电脑开启热点共享上网时，解决 Windows 默认因无设备连接而自动休眠关闭热点的痛点。
-            - **原生 WinRT 守护机制**: 采用 Windows 原生 WinRT API 实时探测并拉起热点，断线重连认证后联动恢复，保持数据连接永不断线。
-
-            ### 🎨 客户端 UI 深度重构 (Dark Acrylic Glassmorphism)
-            - **深色极客毛玻璃视效**: 采用深空流光微粒背景、24px 高斯模糊磨砂亚克力面板、超细 1px 微光边框。
-            - **动态网络雷达环 (Hero Gauge)**: 140px 发光动态仪表盘，在线/待登录/掉线/检测中状态呼吸变色，直观醒目。
-            - **学生身份名片 (Profile Card)**: 专属科技感头像、学号展示、移动/联通/电信专属品牌微光标签与一键更改抽屉。
-            - **精炼与安全优化**: 移除冗余的“保存并登录”按钮，默认窗口优化为 460×800 并设置最小约束，输入框示例参数全面脱敏匿名化。
-            - **智能滑动开关 & 胶囊操作**: 扁平化无缝滑动开关与微光悬浮按键。
-            - **可折叠活动时间轴 (Activity Terminal)**: 终端等宽字体，支持 `[+]` 绿标、`[!]` 红标、`[*]` 蓝标语义化高亮。
-
-            ### 🚀 稳定性与体验深度加固 (User Experience Fixes)
-            - **支持字母账号 (补卡/工号无忧)**: 解除纯数字限制，完美支持字母与数字组合（如补卡后缀 `ls` / `lls`、前缀字母学号），输入误含 `@` 自动智能剥离。
-            - **开机自启彻底静默保活**: 注册表注入 `--autostart` 标志且初始窗口不可见，电脑开机重启后绝对静默驻留系统托盘，彻底告别弹窗打扰。
+            - `xywdl.sh` - 独立 Shell 脚本 (Linux/macOS, 需要 curl 或 python3)
 
             ## 升级说明
 
             从旧版本升级：
-            1. 直接下载安装最新的 v2.0.9 安装包覆盖安装即可
+            1. 直接下载安装最新的安装包覆盖安装即可
             2. 现有账号与 WiFi 配置自动保留
             3. 若之前遇到连接过慢、卡在待认证或被意外掐线，升级后即可极速恢复秒登
           files: |
