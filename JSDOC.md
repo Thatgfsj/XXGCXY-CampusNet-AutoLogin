@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.1.1 |
+| **当前版本** | 2.2.0 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -1264,3 +1264,18 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 
 #### 4. 跨语言配置 Schema 契约完备性核验
 - 对齐 Rust、前端 JS、PowerShell 脚本间 14 个核心字段与默认值 fallback 逻辑，确保旧版本数据无缝升级。
+
+### 12.13 v2.2.0 恢复历史命名规范（xxgcxy-wifi）与 Windows 原生中文可执行文件
+
+#### 1. 构建与产物命名回归
+- 统一 `tauri.conf.json`、`Cargo.toml`、`package.json` 的项目名称为 `xxgcxy-wifi`，构建安装包恢复为 `xxgcxy-wifi_2.2.0_x64-setup.exe` 与 `xxgcxy-wifi_2.2.0_amd64.deb`，与历史发布命名规范保持一致。
+
+#### 2. NSIS 自动化后置处理与中文可执行文件
+- 在 `installer.nsi` 的 `NSIS_HOOK_POSTINSTALL` 宏中，安装完成后自动将主可执行文件复制为 `新乡工程校园网保活.exe`。
+- 清除默认英文快捷方式，生成桌面与“开始”菜单「新乡工程校园网保活」专属中文快捷方式及卸载入口。
+- 在 `NSIS_HOOK_PREUNINSTALL` 宏中自动清理中文文件与快捷方式，并先安全结束相关进程。
+
+#### 3. 运行时无缝交接与注册表适配
+- Rust 后端 `run()` 增设 Windows 原生转交逻辑：如果由 `xxgcxy-wifi.exe` 启动且同目录下存在 `新乡工程校园网保活.exe`，自动转交由中文程序接管运行并退出自身。
+- 注册表开机自启动使用「新乡工程校园网保活」，且向后兼容读取旧版本 `CampusWifiHelper` 与 `XXGCXY_WiFi`。
+- 系统托盘悬浮提示同步设定为「新乡工程校园网保活」。

@@ -696,7 +696,9 @@ fn get_autostart_enabled() -> bool {
         if let Ok(key) =
             hkcu.open_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_READ)
         {
-            return key.get_value::<String, _>("CampusWifiHelper").is_ok();
+            return key.get_value::<String, _>("新乡工程校园网保活").is_ok()
+                || key.get_value::<String, _>("CampusWifiHelper").is_ok()
+                || key.get_value::<String, _>("XXGCXY_WiFi").is_ok();
         }
         false
     }
@@ -721,6 +723,9 @@ fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
             .create_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_WRITE)
             .map_err(|e| format!("打开注册表失败: {}", e))?
             .0;
+        let _ = key.delete_value("CampusWifiHelper");
+        let _ = key.delete_value("XXGCXY_WiFi");
+        let _ = key.delete_value("新乡工程校园网保活");
         if enabled {
             let exe_path = std::env::current_exe()
                 .map_err(|e| format!("获取程序路径失败: {}", e))?
@@ -728,10 +733,8 @@ fn set_autostart_enabled(enabled: bool) -> Result<(), String> {
                 .to_string();
             // 路径含空格时必须加引号, 并且追加 --autostart 参数以便开机启动时静默保持托盘运行
             let reg_value = format!("\"{}\" --autostart", exe_path);
-            key.set_value("CampusWifiHelper", &reg_value)
+            key.set_value("新乡工程校园网保活", &reg_value)
                 .map_err(|e| format!("写入注册表失败: {}", e))?;
-        } else {
-            let _ = key.delete_value("CampusWifiHelper");
         }
         Ok(())
     }
@@ -1828,6 +1831,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(icon) = icon {
         tray_builder = tray_builder.icon(icon);
     }
+    tray_builder = tray_builder.tooltip("新乡工程校园网保活");
     tray_builder.build(app)?;
     Ok(())
 }
@@ -1836,6 +1840,26 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    {
+        // 若以旧名/打包名 xxgcxy-wifi.exe 启动，且同目录下已生成中文程序「新乡工程校园网保活.exe」，则自动无缝交接至中文程序
+        if let Ok(current_path) = std::env::current_exe() {
+            if let Some(file_name) = current_path.file_name().and_then(|s| s.to_str()) {
+                if file_name.eq_ignore_ascii_case("xxgcxy-wifi.exe") {
+                    if let Some(parent) = current_path.parent() {
+                        let target_exe = parent.join("新乡工程校园网保活.exe");
+                        if target_exe.exists() {
+                            let _ = std::process::Command::new(target_exe)
+                                .args(std::env::args().skip(1))
+                                .spawn();
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if !check_single_instance() {
         return;
     }
