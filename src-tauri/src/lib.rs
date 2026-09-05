@@ -1202,7 +1202,7 @@ fn get_connected_wifi() -> Option<String> {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
             let line = line.trim();
-            if line.starts_with("SSID") && line.contains(':') {
+            if line.starts_with("SSID") && !line.starts_with("BSSID") && line.contains(':') {
                 let parts: Vec<&str> = line.splitn(2, ':').collect();
                 if parts.len() > 1 {
                     let ssid = parts[1].trim().to_string();

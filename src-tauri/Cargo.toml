@@ -1,6 +1,6 @@
 [package]
 name = "xxgcxy-wifi"
-version = "2.2.1"
+version = "2.2.2"
 description = "校园网自动登录助手"
 authors = ["Thatgfsj"]
 license = "MIT"

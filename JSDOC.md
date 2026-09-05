@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.2.1 |
+| **当前版本** | 2.2.2 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -1293,4 +1293,20 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 #### 3. 前端自动化探测与防御性登录闭环
 - 优化 `check_network` 逻辑：当未配置 SSID 时，只要存在已连 WiFi 即允许通行与执行登录，不再盲目返回 `needs_login: false`。
 - 前端 `checkNetwork` 防御性加固：只要处于连上 WiFi 但无法直通外网的状态，无条件发起 Web 认证；手动“立即检测”时重置防抖计时，实现秒级响应。
+
+### 12.15 v2.2.2 实机全链路真实网络环境闭环与多发送器实战核验
+
+#### 1. 用户真实网络硬件与网关实测
+- 在宿主实机上通过真实无线网卡（Realtek RTL8852BE WiFi 6，SSID: `XinKe_Hist_Stu`，IP: `10.4.124.192`，MAC: `f4:6a:dd:e5:4a:7b`）对真实校园网网关（`http://172.18.252.12:6060/portal.do`）执行真实发包测试。
+- 完整通过真实 DPAPI 密钥解密、参数 URL 编码、HTTP 请求发送及响应判定全流程，实机网关返回 `code: "0", message: "认证成功"`。
+
+#### 2. 三层发送器（PowerShell / C# / Python）实机全量互通
+- **PowerShell (Invoke-WebRequest)**: 耗时 548ms，成功获得网关 200/JSON 认证通过。
+- **C# 原生二进制发送器 (xywdl_sender.exe)**: 耗时 1158ms，成功获得网关认证通过。
+- **Python 3 标准库发送器 (sender.py)**: 耗时 273ms，成功获得网关认证通过。
+- 使用本机 `.NET Framework 4.8 csc.exe` 完成 `sender.cs` 原生重新编译与退出码测试。
+
+#### 3. 网络解析防御性前缀守卫
+- 在 `get_connected_wifi` 中加入 `!line.starts_with("BSSID")` 前缀守卫，彻底避免复杂多网卡输出时的字符串匹配隐患。
+
 

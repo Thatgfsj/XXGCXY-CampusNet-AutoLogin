@@ -132,6 +132,11 @@ npx @tauri-apps/cli build
 
 ## 更新日志
 
+- **v2.2.2**：**实机全链路真实环境闭环验证与多发送器真实互通认证**：
+  1. **实机真实网络联调与认证闭环**：基于用户实机真实无线网卡（Realtek RTL8852BE WiFi 6，已连 `XinKe_Hist_Stu`，IP `10.4.124.192`）与实际校园网网关（`172.18.252.12:6060`）实测，真实 DPAPI 解密与网络交互全链路 100% 连通；
+  2. **三层发送器（PowerShell / C# / Python）实战全量通过**：在实际机器上直接驱动 PowerShell (548ms)、C# 原生独立发送器 (1158ms)、Python 3 标准库发送器 (273ms) 真实请求校园网认证接口，三端均成功获得网关返回 `code: "0", message: "认证成功"`；
+  3. **C# 编译器本地无缝构建校验**：使用本地 `.NET Framework v4.0.30319 csc.exe` 完成 `sender.cs` 原生二进制本地重编译与静默输出验证；
+  4. **WiFi 解析安全防护加固**：在 `get_connected_wifi` 中加入 `!line.starts_with("BSSID")` 防御性前缀守卫，消除多网卡环境下可能的虚假 SSID 捕获风险。
 - **v2.2.1**：**修复 Hero Gauge 雷达动画偏心/换算异常，彻底根除 UTF-8 BOM 导致的自动认证失效**：
   1. **Hero Gauge 旋转与圆周几何修复**：将仪表盘 `<circle r="54">` 的 SVG `stroke-dasharray` 精确校准为理论圆周长 `339.3`（彻底消除 38px 的重叠缝隙）；将检测中的旋转动画由内层 `<circle>` 的偏心绕点迁移至外层 `.radar-svg` 以中心为原点的原生平滑旋转（`radarSvgSpin`），彻底解决检测网络时仪表环偏心乱晃的动画异常；
   2. **全面防御性清洗 UTF-8 BOM 头**：Rust 端的 `load_config`、`load_campus_net_info`、`get_login_profile`、`is_login_configured` 以及启动时的 `AppState` 初始化全面挂载 `strip_bom` 过滤函数，彻底根除 PowerShell 写入带 BOM 导致 JSON 反序列化失败、使得内存中 `primary_ssid` 为空的系统级隐患；
