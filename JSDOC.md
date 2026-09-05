@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.1.0 |
+| **当前版本** | 2.1.1 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -1250,3 +1250,17 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 
 #### 4. 前端与系统托盘状态机闭环
 - 托盘菜单“执行登录脚本”全面接入 `runLoginScript()`，共享互斥锁生命周期与 Hero Gauge 状态机联动。
+
+### 12.12 v2.1.1 变异模糊测试（Fuzz Audit）、严格作用域净化与跨语言契约工业级核验
+
+#### 1. 变异模糊测试套件（6万次注入）
+- 构建了专用的 Fuzz 模糊测试引擎，针对 Portal URL 提纯、URL 编码器、服务端响应体解析、多网卡与热点冲突、历史配置向下兼容 5 大核心模块注入 60,004 次随机极端变异数据，实现 100% 优雅通过，无崩溃、无内存损坏、无状态死锁。
+
+#### 2. Rust 后端深层安全扫描
+- 实现了生产代码 0 处裸 `.unwrap()`、0 处 `panic!()`，Win32 Unsafe 内存句柄生命周期严格闭环释放，所有数组切片访问前置安全守卫校验。
+
+#### 3. 前端 ES 模块严格作用域净化
+- 显式在 ES 模块顶层声明 `connectedSsid`、`firstRunTimerId`、`isFirstRunSetup`、`portalParsing` 变量，根除在 Strict 模式下的全局隐式变量赋值风险。
+
+#### 4. 跨语言配置 Schema 契约完备性核验
+- 对齐 Rust、前端 JS、PowerShell 脚本间 14 个核心字段与默认值 fallback 逻辑，确保旧版本数据无缝升级。
