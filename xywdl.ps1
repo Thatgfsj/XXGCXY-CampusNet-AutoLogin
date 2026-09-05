@@ -341,8 +341,12 @@ function Test-NetTCPIPModule {
     return $script:HasNetTCPIPModule
 }
 
-# 找"正在 Up 状态的 WiFi/无线网卡" - 优先用 Get-NetAdapter, fallback 到 WMI
+# 找"正在 Up 状态的 WiFi/无线网卡" - 优先用 Get-NetAdapter, fallback 到 WMI (单例缓存避免多次重复扫描)
+$script:CachedWirelessAdapter = $null
 function Get-WirelessAdapter {
+    if ($null -ne $script:CachedWirelessAdapter) {
+        return $script:CachedWirelessAdapter
+    }
     # 路径 1: Win 8+ Get-NetAdapter
     if (Test-NetAdapterModule) {
         try {
@@ -351,7 +355,10 @@ function Get-WirelessAdapter {
                 $_.Status -eq 'Up' -and
                 $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
             } | Select-Object -First 1
-            if ($ad) { return $ad }
+            if ($ad) {
+                $script:CachedWirelessAdapter = $ad
+                return $ad
+            }
         } catch {}
     }
     # 路径 2: Win 7+ WMI Win32_NetworkAdapter (Win 95+ 都有, 最稳)
@@ -363,7 +370,10 @@ function Get-WirelessAdapter {
                 ($_.Name -match 'Wi-Fi|Wireless|WLAN|802\.11') -and
                 $_.Name -notmatch 'Virtual|VMware|Hyper-V|VirtualBox'
             } | Select-Object -First 1
-        if ($wmi) { return $wmi }
+        if ($wmi) {
+            $script:CachedWirelessAdapter = $wmi
+            return $wmi
+        }
     } catch {}
     return $null
 }

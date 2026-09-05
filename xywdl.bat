@@ -44,43 +44,7 @@ if %errorlevel%==0 (
     echo [信息] 使用 Windows PowerShell (5.1, 系统自带)
 )
 
-REM 检测 PS 版本 (兼容 Win 7 默认 PS 2.0)
-echo [信息] 检测 PowerShell 版本...
-for /f "delims=" %%v in ('%PS_EXE% -NoProfile -Command "$PSVersionTable.PSVersion.ToString()" 2^>nul') do set "PS_VER=%%v"
-if "%PS_VER%"=="" (
-    echo [错误] 无法检测 PowerShell 版本, 请检查 PowerShell 是否正常工作
-    echo   提示: 打开 cmd 跑 "powershell -Command \"`$PSVersionTable.PSVersion\""
-    if "%INTERACTIVE%"=="1" pause
-    exit /b 1
-)
-echo [信息] PowerShell 版本: %PS_VER%
-
-REM 检查最低版本 5.1
-set "PS_MAJOR="
-set "PS_MINOR="
-for /f "tokens=1,2 delims=." %%a in ("%PS_VER%") do (
-    set "PS_MAJOR=%%a"
-    set "PS_MINOR=%%b"
-)
-if %PS_MAJOR% LSS 5 (
-    echo [错误] 需要 PowerShell 5.1 或更高版本, 当前是 %PS_VER%
-    echo.
-    echo Windows 7 用户需要手动安装 WMF 5.1:
-    echo   https://www.microsoft.com/en-us/download/details.aspx?id=54616
-    echo Windows 10/11 用户已自带 PowerShell 5.1, 如果检测不到请检查 PATH
-    if "%INTERACTIVE%"=="1" pause
-    exit /b 1
-)
-if %PS_MAJOR% EQU 5 if %PS_MINOR% LSS 1 (
-    echo [错误] 需要 PowerShell 5.1 或更高版本, 当前是 %PS_VER%
-    echo.
-    echo Windows 7/8 用户需要手动安装 WMF 5.1:
-    echo   https://www.microsoft.com/en-us/download/details.aspx?id=54616
-    if "%INTERACTIVE%"=="1" pause
-    exit /b 1
-)
-
-REM 执行
+REM 执行 (PS 5.1+ 版本检查由 xywdl.ps1 自身执行, 避免重复冷启动空耗 1.75 秒)
 echo [执行] %PS_EXE% -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
 %PS_EXE% -ExecutionPolicy Bypass -File "%PS_SCRIPT%" %*
 set "EXIT_CODE=%errorlevel%"

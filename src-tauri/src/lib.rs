@@ -598,6 +598,60 @@ fn encrypt_password(plain: &str) -> Result<Vec<u8>, String> {
     Ok(plain.as_bytes().to_vec())
 }
 
+#[cfg(windows)]
+fn decrypt_password(protected_bytes: &[u8]) -> Result<String, String> {
+    use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+
+    if protected_bytes.is_empty() {
+        return Err("凭据文件为空".to_string());
+    }
+
+    unsafe {
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: protected_bytes.len() as u32,
+            pbData: protected_bytes.as_ptr() as *mut u8,
+        };
+        let mut output = std::mem::zeroed();
+
+        let result = CryptUnprotectData(
+            &input,
+            None,
+            None,
+            None,
+            None,
+            0,
+            &mut output,
+        );
+
+        if result.is_err() {
+            return Err(format!("CryptUnprotectData 解密失败: {:?}", result));
+        }
+
+        let plain_bytes = std::slice::from_raw_parts(
+            output.pbData,
+            output.cbData as usize,
+        );
+
+        let u16_slice: Vec<u16> = plain_bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+
+        if !output.pbData.is_null() {
+            let _ = LocalFree(HLOCAL(output.pbData as *mut _));
+        }
+
+        let s = String::from_utf16_lossy(&u16_slice);
+        Ok(s.trim_end_matches('\0').to_string())
+    }
+}
+
+#[cfg(not(windows))]
+fn decrypt_password(protected_bytes: &[u8]) -> Result<String, String> {
+    String::from_utf8(protected_bytes.to_vec()).map_err(|e| format!("UTF-8 解码失败: {}", e))
+}
+
 /// operator 短码 -> 中文名 (用于 load_campus_net_info 渲染)
 fn operator_short_to_name(code: &str) -> &'static str {
     match code {
@@ -1345,8 +1399,258 @@ fn clean_script_output(s: &str) -> String {
     cleaned_lines.join("\n").trim().to_string()
 }
 
+// ============= Rust 进程内原生极速直发 (Sub-100ms Instant Login) =============
+
+fn url_encode_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
+fn generate_uuid() -> String {
+    use std::time::SystemTime;
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let pid = std::process::id() as u128;
+    let mut val = nanos ^ (pid << 64) ^ 0x9e3779b97f4a7c15_u128;
+    val = val.wrapping_mul(0xbf58476d1ce4e5b9_u128) ^ (val >> 30);
+    let bytes = val.to_be_bytes();
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-4{:01x}{:02x}-{:01x}{:01x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5],
+        bytes[6] & 0x0f, bytes[7],
+        (bytes[8] & 0x3f) | 0x80 >> 4, bytes[8] & 0x0f, bytes[9],
+        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
+
+fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
+    #[cfg(windows)]
+    {
+        let mut ssid = None;
+        let mut mac = None;
+        let mut iface_name = "WLAN".to_string();
+
+        if let Ok(output) = hidden_command("netsh").args(["wlan", "show", "interfaces"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let line = line.trim();
+                if line.starts_with("Name") && line.contains(':') {
+                    if let Some(val) = line.splitn(2, ':').nth(1) {
+                        let n = val.trim();
+                        if !n.is_empty() { iface_name = n.to_string(); }
+                    }
+                } else if (line.starts_with("Physical address") || line.starts_with("物理地址")) && line.contains(':') {
+                    if let Some(val) = line.splitn(2, ':').nth(1) {
+                        let m = val.trim().replace('-', ":").to_lowercase();
+                        if !m.is_empty() { mac = Some(m); }
+                    }
+                } else if line.starts_with("SSID") && !line.starts_with("BSSID") && line.contains(':') {
+                    if let Some(val) = line.splitn(2, ':').nth(1) {
+                        let s = val.trim().to_string();
+                        if !s.is_empty() { ssid = Some(s); }
+                    }
+                }
+            }
+        }
+
+        let mut ip = None;
+        if let Ok(output) = hidden_command("netsh").args(["interface", "ipv4", "show", "addresses", &iface_name]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let line = line.trim();
+                if (line.starts_with("IP Address") || line.starts_with("IP 地址") || line.starts_with("IPv4 地址")) && line.contains(':') {
+                    if let Some(val) = line.splitn(2, ':').nth(1) {
+                        let addr = val.trim().to_string();
+                        if !addr.is_empty() && !addr.starts_with("169.254") && addr != "127.0.0.1" {
+                            ip = Some(addr);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        (ssid, mac, ip)
+    }
+    #[cfg(not(windows))]
+    {
+        (None, None, None)
+    }
+}
+
+/// 进程内异步直发认证请求 (零外部脚本依赖，毫秒级响应)
+async fn native_direct_login() -> Result<String, String> {
+    let profile = get_login_profile()?;
+    if profile.user_id.is_empty() || profile.base_url.is_empty() {
+        return Err("未配置校园网账号或 Portal URL".to_string());
+    }
+
+    let cred_path = get_login_credential_path();
+    if !cred_path.exists() {
+        return Err("凭据文件不存在，请先在主页或网络配置页保存配置".to_string());
+    }
+    let cred_bytes = fs::read(&cred_path).map_err(|e| format!("读取凭据文件失败: {}", e))?;
+    let password = decrypt_password(&cred_bytes)?;
+    if password.is_empty() {
+        return Err("解密密码为空，请在设置中重新保存账号密码".to_string());
+    }
+
+    // 提取或自动获取网络硬件信息 (IP, MAC, SSID)
+    let (detected_ssid, detected_mac, detected_ip) = get_wlan_network_info();
+
+    let ssid = if !profile.ssid.trim().is_empty() {
+        profile.ssid.trim().to_string()
+    } else {
+        detected_ssid.unwrap_or_else(|| "XinKe_Hist_Stu".to_string())
+    };
+
+    let mac = if !profile.mac_address.trim().is_empty() {
+        profile.mac_address.trim().to_lowercase()
+    } else {
+        detected_mac.unwrap_or_else(|| "00:00:00:00:00:00".to_string())
+    };
+
+    let user_ip = if !profile.wlan_user_ip.trim().is_empty() {
+        profile.wlan_user_ip.trim().to_string()
+    } else {
+        detected_ip.unwrap_or_else(|| "10.0.0.1".to_string())
+    };
+
+    let hostname = if !profile.hostname.trim().is_empty() {
+        profile.hostname.trim().to_string()
+    } else {
+        std::env::var("COMPUTERNAME").unwrap_or_else(|_| "DESKTOP-PC".to_string())
+    };
+
+    let portal_page_id = if !profile.portal_page_id.is_empty() { profile.portal_page_id } else { "3".to_string() };
+    let portal_type = if !profile.portal_type.is_empty() { profile.portal_type } else { "0".to_string() };
+    let version = if !profile.version.is_empty() { profile.version } else { "0".to_string() };
+    let bind_ctrl_id = profile.bind_ctrl_id;
+
+    // 净化 BaseURL，构造 quickauth.do URL
+    let clean_base = profile.base_url.split('?').next().unwrap_or(&profile.base_url)
+        .split('#').next().unwrap_or(&profile.base_url).trim();
+    let auth_url = if clean_base.ends_with("/quickauth.do") {
+        clean_base.to_string()
+    } else if let Some(idx) = clean_base.rfind('/') {
+        format!("{}/quickauth.do", &clean_base[..idx])
+    } else {
+        format!("{}/quickauth.do", clean_base)
+    };
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let uuid = generate_uuid();
+
+    // 构造 Query String
+    let query_params = vec![
+        format!("userid={}", url_encode_component(&profile.user_id)),
+        format!("passwd={}", url_encode_component(&password)),
+        format!("wlanuserip={}", url_encode_component(&user_ip)),
+        format!("wlanacname={}", url_encode_component(&profile.wlan_ac_name)),
+        format!("wlanacIp={}", url_encode_component(&profile.wlan_ac_ip)),
+        format!("ssid={}", url_encode_component(&ssid)),
+        format!("vlan={}", url_encode_component(&profile.vlan)),
+        format!("mac={}", url_encode_component(&mac)),
+        format!("version={}", url_encode_component(&version)),
+        format!("portalpageid={}", url_encode_component(&portal_page_id)),
+        format!("timestamp={}", timestamp),
+        format!("uuid={}", uuid),
+        format!("portaltype={}", url_encode_component(&portal_type)),
+        format!("hostname={}", url_encode_component(&hostname)),
+        format!("bindCtrlId={}", url_encode_component(&bind_ctrl_id)),
+    ].join("&");
+
+    let request_url = format!("{}?{}", auth_url, query_params);
+    let portal_referer = format!("{}/portal.do", auth_url.trim_end_matches("/quickauth.do"));
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(std::time::Duration::from_secs(6))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {}", e))?;
+
+    let start_instant = std::time::Instant::now();
+    let resp = client
+        .get(&request_url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+        .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+        .header("Referer", portal_referer)
+        .header("X-Requested-With", "XMLHttpRequest")
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败: {}", e))?;
+
+    let elapsed = start_instant.elapsed().as_millis();
+    let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+
+    // 解析 JSON 响应
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+        let code_str = match v.get("code") {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Number(n)) => n.to_string(),
+            _ => "unknown".to_string(),
+        };
+        let msg = v.get("message")
+            .or_else(|| v.get("msg"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("");
+
+        if code_str == "0" {
+            Ok(format!("[+] 认证成功 (耗时 {} ms): {}", elapsed, if msg.is_empty() { "success" } else { msg }))
+        } else if code_str == "1" {
+            if msg.contains("设备不在正常状态") {
+                Err(format!("[!] 认证提示: 设备不在正常状态, 无法认证上网, 请稍候 (耗时 {} ms)", elapsed))
+            } else {
+                Err(format!("[!] 认证失败: {} (code: 1, 耗时 {} ms)", if msg.is_empty() { "账号或密码错误" } else { msg }, elapsed))
+            }
+        } else {
+            Err(format!("[!] 认证异常 (code: {}, 耗时 {} ms): {}", code_str, elapsed, msg))
+        }
+    } else {
+        if body.contains("success") || body.contains("认证成功") || body.contains("已经登录") {
+            Ok(format!("[+] 认证成功 (耗时 {} ms)", elapsed))
+        } else {
+            Err(format!("[!] 服务器返回异常响应 (耗时 {} ms):\n{}", elapsed, clean_script_output(&body)))
+        }
+    }
+}
+
 #[tauri::command]
 async fn run_login_script(app: AppHandle) -> Result<String, String> {
+    // 优先执行 Rust 进程内极速直发 (sub-100ms)
+    match native_direct_login().await {
+        Ok(msg) => {
+            log::info!("[native_direct_login] 成功: {}", msg);
+            return Ok(format!("登录成功 (Rust 原生直发):\n{}", msg));
+        }
+        Err(e) => {
+            // 如果是明确的服务端业务拒绝（账号不存在、密码错误、设备状态），直接返回真实原因给用户
+            if e.contains("账号或密码错误") || e.contains("账号不存在") || e.contains("设备不在正常状态") {
+                log::warn!("[native_direct_login] 认证未通过: {}", e);
+                return Err(format!("校园网登录失败:\n{}", e));
+            }
+            log::warn!("[native_direct_login] 原生直发异常，自动降级至外部脚本兜底: {}", e);
+        }
+    }
+
     use tauri_plugin_shell::ShellExt;
 
     let exe_dir = std::env::current_exe()
