@@ -214,8 +214,8 @@
             stroke-width: 8;
             stroke-linecap: round;
             fill: none;
-            stroke-dasharray: 377;
-            stroke-dashoffset: 60;
+            stroke-dasharray: 339.3;
+            stroke-dashoffset: 85;
             transition: stroke 0.4s ease, stroke-dashoffset 0.6s ease;
             filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.6));
         }
@@ -272,7 +272,7 @@
 
         .state-needs-login .radar-meter-circle {
             stroke: var(--status-warn);
-            stroke-dashoffset: 90;
+            stroke-dashoffset: 85;
             filter: drop-shadow(0 0 10px rgba(245, 158, 11, 0.7));
         }
         .state-needs-login .status-text { color: var(--status-warn); }
@@ -280,20 +280,24 @@
 
         .state-disconnected .radar-meter-circle {
             stroke: var(--status-err);
-            stroke-dashoffset: 260;
+            stroke-dashoffset: 255;
             filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.5));
         }
         .state-disconnected .status-text { color: var(--status-err); }
         .state-disconnected .status-pulse-dot { background: var(--status-err); box-shadow: 0 0 8px var(--status-err); }
 
+        .state-checking .radar-svg {
+            animation: radarSvgSpin 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+            transform-origin: center;
+        }
+        @keyframes radarSvgSpin {
+            from { transform: rotate(-90deg); }
+            to { transform: rotate(270deg); }
+        }
         .state-checking .radar-meter-circle {
             stroke: var(--accent-cyan);
-            stroke-dashoffset: 140;
-            animation: radarRotate 1.5s linear infinite;
-        }
-        @keyframes radarRotate {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+            stroke-dashoffset: 170;
+            filter: drop-shadow(0 0 10px rgba(6, 182, 212, 0.7));
         }
 
         /* 2. 网络参数指示栏 (Network Info Pills) */
@@ -849,7 +853,7 @@
             <div class="app-brand">
                 <div class="app-logo-badge">📶</div>
                 <div class="app-title-group">
-                    <h1>校园网助手 <span class="app-ver-pill">v2.2.0</span></h1>
+                    <h1>校园网助手 <span class="app-ver-pill">v2.2.1</span></h1>
                 </div>
             </div>
             <button class="header-btn" onclick="showSetup()">
@@ -1333,9 +1337,9 @@
                         await runHotspotKeepaliveCheck(isManual);
                         return;
                     }
-                    if (retryStatus.needs_login) {
+                    if (retryStatus.needs_login || (!retryStatus.internet_ok && retryStatus.wifi_connected)) {
                         const now = Date.now();
-                        if (now - lastLoginTime >= 4000) {
+                        if (isManual || now - lastLoginTime >= 4000) {
                             addLog('[*] 重连后需要登录校园网，正在执行登录...');
                             await runLoginScript();
                         }
@@ -1349,9 +1353,9 @@
                     return;
                 }
                 
-                if (status.needs_login) {
+                if (status.needs_login || (!status.internet_ok && status.wifi_connected)) {
                     const now = Date.now();
-                    if (now - lastLoginTime < 4000) {
+                    if (!isManual && now - lastLoginTime < 4000) {
                         console.log('刚登录过，冷却中');
                         return;
                     }
@@ -1589,6 +1593,7 @@
         async function checkNow() {
             addLog('正在检测网络...');
             isLoggingIn = false; // 用户主动点立即检测时，清除卡滞锁
+            lastLoginTime = 0;   // 允许立即重试登录
             const gauge = document.getElementById('gaugeCard');
             if (gauge) {
                 gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected');

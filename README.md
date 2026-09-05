@@ -132,6 +132,11 @@ npx @tauri-apps/cli build
 
 ## 更新日志
 
+- **v2.2.1**：**修复 Hero Gauge 雷达动画偏心/换算异常，彻底根除 UTF-8 BOM 导致的自动认证失效**：
+  1. **Hero Gauge 旋转与圆周几何修复**：将仪表盘 `<circle r="54">` 的 SVG `stroke-dasharray` 精确校准为理论圆周长 `339.3`（彻底消除 38px 的重叠缝隙）；将检测中的旋转动画由内层 `<circle>` 的偏心绕点迁移至外层 `.radar-svg` 以中心为原点的原生平滑旋转（`radarSvgSpin`），彻底解决检测网络时仪表环偏心乱晃的动画异常；
+  2. **全面防御性清洗 UTF-8 BOM 头**：Rust 端的 `load_config`、`load_campus_net_info`、`get_login_profile`、`is_login_configured` 以及启动时的 `AppState` 初始化全面挂载 `strip_bom` 过滤函数，彻底根除 PowerShell 写入带 BOM 导致 JSON 反序列化失败、使得内存中 `primary_ssid` 为空的系统级隐患；
+  3. **自动化保活探测与防御性双重触发**：Rust 后端 `check_network` 优化为即使未显式保存 SSID 也允许任意已连接 WiFi 进行判定与登录；前端 `checkNetwork` 机制升级，只要检测到 WiFi 已连接但无外网连通（`status.needs_login || (!status.internet_ok && status.wifi_connected)`），无缝主动发起 Web Portal 认证；并在手动点击“立即检测”时重置登录冷却计时，彻底恢复全自动化无感联网；
+  4. **AppState 启动预热**：Rust 启动阶段直接从磁盘读取并解析已有配置并同步至内存，无需等待前端首个 IPC 命令即可具备完整的 SSID 守护上下文。
 - **v2.2.0**：**恢复历史命名规范（`xxgcxy-wifi`）并支持 Windows 安装后原生中文文件名与快捷方式**：
   1. **包名与构建产物规范回归**：统一项目包名、Tauri 构建目标以及各平台发布文件名前缀为 `xxgcxy-wifi`，保持历史下载规范一致性（`xxgcxy-wifi_2.2.0_x64-setup.exe`、`xxgcxy-wifi_2.2.0_amd64.deb` 等）；
   2. **安装后自动转为中文名**：NSIS 安装器钩子（`installer.nsi`）在安装完成之后自动将目标可执行文件复制并命名为 `新乡工程校园网保活.exe`；

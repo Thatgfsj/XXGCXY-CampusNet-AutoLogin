@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.2.0 |
+| **当前版本** | 2.2.1 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -1279,3 +1279,18 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 - Rust 后端 `run()` 增设 Windows 原生转交逻辑：如果由 `xxgcxy-wifi.exe` 启动且同目录下存在 `新乡工程校园网保活.exe`，自动转交由中文程序接管运行并退出自身。
 - 注册表开机自启动使用「新乡工程校园网保活」，且向后兼容读取旧版本 `CampusWifiHelper` 与 `XXGCXY_WiFi`。
 - 系统托盘悬浮提示同步设定为「新乡工程校园网保活」。
+
+### 12.14 v2.2.1 Hero Gauge 动画几何校准与自动重连认证双重加固
+
+#### 1. Hero Gauge 雷达动画与几何尺寸修复
+- 将仪表盘 SVG `<circle r="54">` 对应周长从错误的 `377` 校准至真实的 `339.3`，彻底消除仪表环接缝溢出 38px 造成的切边与视觉断层。
+- 将探测过程中的旋转动效从针对 SVG 子级 `<circle>` 的偏心绕轴修复为针对整个父级 `.radar-svg` 居中平滑旋转（`radarSvgSpin`），解决网络检测期间仪表环偏心乱跑晃动的渲染问题。
+
+#### 2. 全局 UTF-8 BOM 过滤与启动状态机预热
+- 为 Rust 后端所有 JSON 解析入口（`load_config`、`load_campus_net_info`、`get_login_profile`、`is_login_configured` 以及 `run()` 启动的 AppState 注入）集成 `strip_bom()` 过滤，防御 PowerShell 等外部工具写带 BOM 的 JSON 引发的反序列化静默失败。
+- 启动时立即自磁盘预加载现有配置，避免前端发送首个 IPC 命令前内存处于默认空配置状态。
+
+#### 3. 前端自动化探测与防御性登录闭环
+- 优化 `check_network` 逻辑：当未配置 SSID 时，只要存在已连 WiFi 即允许通行与执行登录，不再盲目返回 `needs_login: false`。
+- 前端 `checkNetwork` 防御性加固：只要处于连上 WiFi 但无法直通外网的状态，无条件发起 Web 认证；手动“立即检测”时重置防抖计时，实现秒级响应。
+

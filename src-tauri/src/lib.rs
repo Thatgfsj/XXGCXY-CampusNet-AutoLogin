@@ -50,6 +50,13 @@ fn check_single_instance() -> bool {
     }
 }
 
+// ============= 兼容 UTF-8 BOM 清洗 =============
+
+#[inline]
+fn strip_bom(s: &str) -> &str {
+    s.strip_prefix("\u{feff}").unwrap_or(s)
+}
+
 // ============= 隐藏命令行窗口 =============
 
 #[cfg(windows)]
@@ -247,7 +254,7 @@ fn load_campus_net_info() -> Result<CampusNetInfo, String> {
         .map_err(|e| format!("读取校园网配置失败: {}", e))?;
     // v1.9.0+ 新格式直接是 LoginProfile JSON (snake_case)
     // 兼容旧 v1.8.x PascalCase 格式 (UserId/Ssid)
-    let json: serde_json::Value = serde_json::from_str(&content)
+    let json: serde_json::Value = serde_json::from_str(strip_bom(&content))
         .map_err(|e| format!("解析校园网配置失败: {}", e))?;
 
     let user_id = json
@@ -316,7 +323,7 @@ fn is_login_configured() -> bool {
     }
     match fs::read_to_string(&profile_path) {
         Ok(content) => {
-            match serde_json::from_str::<LoginProfile>(&content) {
+            match serde_json::from_str::<LoginProfile>(strip_bom(&content)) {
                 Ok(p) => !p.user_id.is_empty() && !p.base_url.is_empty(),
                 Err(_) => false,
             }
@@ -334,7 +341,7 @@ fn get_login_profile() -> Result<LoginProfile, String> {
     }
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("读取登录配置失败: {}", e))?;
-    serde_json::from_str(&content)
+    serde_json::from_str(strip_bom(&content))
         .map_err(|e| format!("解析登录配置失败: {}", e))
 }
 
@@ -897,7 +904,7 @@ fn load_config(state: tauri::State<'_, AppState>) -> Result<Config, String> {
         let content =
             fs::read_to_string(&config_path).map_err(|e| format!("读取配置文件失败: {}", e))?;
         let config: Config =
-            serde_json::from_str(&content).map_err(|e| format!("解析配置文件失败: {}", e))?;
+            serde_json::from_str(strip_bom(&content)).map_err(|e| format!("解析配置文件失败: {}", e))?;
         let mut current_config = state.config.lock().unwrap_or_else(|e| e.into_inner());
         *current_config = config.clone();
         if !config.primary_ssid.is_empty() {
@@ -1348,15 +1355,22 @@ async fn check_network(state: tauri::State<'_, AppState>) -> Result<NetworkStatu
     let is_matched_ssid = |cur: &str, target: &str| -> bool {
         !target.is_empty() && cur.eq_ignore_ascii_case(target)
     };
+    let has_configured_ssid = !config.primary_ssid.is_empty() || !config.backup_ssid.is_empty();
     let connected_matches = match &wifi_connected {
-        Some(ssid) => is_matched_ssid(ssid, &config.primary_ssid) || is_matched_ssid(ssid, &config.backup_ssid),
+        Some(ssid) => {
+            if !has_configured_ssid {
+                true
+            } else {
+                is_matched_ssid(ssid, &config.primary_ssid) || is_matched_ssid(ssid, &config.backup_ssid)
+            }
+        }
         None => false,
     };
     let needs_reconnect = wifi_connected.is_none()
-        || (!config.primary_ssid.is_empty() && !connected_matches);
+        || (has_configured_ssid && !connected_matches);
     let needs_login = wifi_connected.is_some()
         && !internet_ok
-        && (!config.primary_ssid.is_empty() && connected_matches);
+        && connected_matches;
     Ok(NetworkStatus {
         wifi_connected,
         internet_ok,
@@ -1907,10 +1921,25 @@ pub fn run() {
 
             Ok(())
         })
-        .manage(AppState {
-            config: Mutex::new(Config::default()),
-            first_run: Mutex::new(true),
-            check_enabled: Mutex::new(true),
+        .manage({
+            let initial_config = {
+                let path = get_config_path();
+                if path.exists() {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        serde_json::from_str::<Config>(strip_bom(&content)).unwrap_or_default()
+                    } else {
+                        Config::default()
+                    }
+                } else {
+                    Config::default()
+                }
+            };
+            let is_first_run = initial_config.primary_ssid.is_empty();
+            AppState {
+                config: Mutex::new(initial_config),
+                first_run: Mutex::new(is_first_run),
+                check_enabled: Mutex::new(true),
+            }
         })
         .invoke_handler(tauri::generate_handler![
             load_config,
