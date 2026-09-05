@@ -1121,6 +1121,10 @@
         let checkIntervalId = null;
         let isLoggingIn = false;  // 防止重复登录
         let lastLoginTime = 0;    // 上次登录时间
+        let connectedSsid = '';
+        let firstRunTimerId = null;
+        let isFirstRunSetup = false;
+        let portalParsing = false;
         
         // 初始化
         window.onload = async () => {
