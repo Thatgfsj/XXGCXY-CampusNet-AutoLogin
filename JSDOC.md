@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.0.9 |
+| **当前版本** | 2.1.0 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -1232,6 +1232,21 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 - **双模熔断与降级保护**：`run_login_script` 默认执行原生直发，遇环境异常时无缝回退至 `xywdl.bat` / `xywdl.sh` 外部脚本，实现 100% 向后兼容；
 - **外部脚本瘦身**：剔除 `xywdl.bat` 重复查询版本的 1.75 秒损耗，并在 `xywdl.ps1` 为网卡适配器加入单例缓存。
 
+### 12.11 v2.1.0 五维子代理深度审计与底层网络协议栈全链路工业级加固
 
+#### 1. Rust 发包与网络探测加固
+- **RFC 4122 v4 UUID 生成规范修复**：修复 `generate_uuid()` 中 `(bytes[8] & 0x3f) | 0x80 >> 4` 运算符优先级导致 UUID 偶发畸变为 37~38 位的底层 Bug，规范为标准 36 字符 RFC 4122 v4；
+- **中文系统网卡信息提取增强**：`get_wlan_network_info()` 支持“名称”匹配，增加活动网卡 IPv4 遍历兜底，彻底杜绝回退假 IP `10.0.0.1`；
+- **Captive Portal 探针加固**：204 端点遇 302 重定向 100% 判定为需登录（防止漏判），使用 `String::from_utf8_lossy` 流式读取，杜绝 GBK 编码 Portal 页面解析报错误判为已连接；备用端点接入国内高可用 204。
 
+#### 2. Python 保底层 (`sender.py`) 加固
+- **阻止 302 重定向跟随**：新增 `NoRedirectHandler`，避免认证通过后 302 跳转至校外未放行网站抛出网络错误；
+- **UTF-8 二进制标准输出**：采用 `sys.stdout.buffer.write` 强制输出 UTF-8 字节流，根除 Windows GBK 控制台下 `UnicodeEncodeError` 崩溃。
 
+#### 3. C# 原生发送器 (`sender.cs`) 加固
+- **输入清洗**：循环清理 `\uFEFF` BOM 与空白字符；
+- **协议升级**：显式配置 TLS 1.1 / TLS 1.2，并指定 `req.KeepAlive = false;`；
+- **输出统一**：显式配置 `Console.OutputEncoding = Encoding.UTF8;`。
+
+#### 4. 前端与系统托盘状态机闭环
+- 托盘菜单“执行登录脚本”全面接入 `runLoginScript()`，共享互斥锁生命周期与 Hero Gauge 状态机联动。

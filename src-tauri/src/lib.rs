@@ -1240,13 +1240,13 @@ fn get_connected_wifi() -> Option<String> {
 // ============= 检测互联网连接 =============
 
 async fn check_internet() -> bool {
-    // 优先使用 HTTP 检测（避免 HTTPS 绕过 captive portal）
+    // 优先使用国内高可用 HTTP 204 探针检测（避免 HTTPS 绕过 captive portal）
     match check_url("http://connect.rom.miui.com/generate_204").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
     }
-    match check_url("http://httpstat.us/204").await {
+    match check_url("http://connectivitycheck.platform.hicloud.com/generate_204").await {
         CheckResult::Connected => return true,
         CheckResult::NeedLogin => return false,
         CheckResult::Error => {}
@@ -1286,61 +1286,44 @@ async fn check_url(url: &str) -> CheckResult {
             Ok(c) => c,
             Err(_) => return CheckResult::Error,
         };
-        let response = match client.get(&url).send() {
+        let mut response = match client.get(&url).send() {
             Ok(r) => r,
             Err(_) => return CheckResult::Error,
         };
         let status = response.status();
+
+        // 1. 对于 generate_204 探测端点，正常联网绝不发生 3xx 重定向
+        // 发生重定向即 100% 代表被内网网关或 Captive Portal 劫持
         if status.is_redirection() {
-            if let Some(location) = response.headers().get("location") {
-                if let Ok(loc_str) = location.to_str() {
-                    let loc_lower = loc_str.to_lowercase();
-                    if loc_lower.contains("portal")
-                        || loc_lower.contains("drcom")
-                        || loc_lower.contains("inode")
-                        || loc_lower.contains("eportal")
-                        || loc_lower.contains("srun")
-                        || loc_lower.contains("authserv")
-                        || loc_lower.contains("1x")
-                        || loc_lower.contains("wlanuserip")
-                        || loc_lower.contains("ntdks")
-                        || (loc_lower.contains("edu") && loc_lower.contains("login"))
-                        || (loc_lower.contains("login") && (loc_lower.contains("auth") || loc_lower.contains("portal") || loc_lower.contains("redirect")))
-                    {
-                        return CheckResult::NeedLogin;
-                    }
-                }
-            }
-            return CheckResult::Connected;
+            return CheckResult::NeedLogin;
         }
+
+        // 2. 正常 204 无内容响应，表示直通外网
         if status.as_u16() == 204 {
             return CheckResult::Connected;
         }
+
+        // 3. 返回 200 OK 说明 204 端点被伪造/篡改返回了登录网页
         if status.is_success() {
             use std::io::Read;
-            let mut limited = response.take(8192);
-            let mut body = String::new();
-            if limited.read_to_string(&mut body).is_ok() {
-                let content_lower = body.to_lowercase();
-                if content_lower.contains("drcom")
-                    || content_lower.contains("inode")
-                    || content_lower.contains("eportal")
-                    || content_lower.contains("srun")
-                    || content_lower.contains("wlanuserip")
-                    || content_lower.contains("portal认证")
-                    || content_lower.contains("校园网认证")
-                    || content_lower.contains("校园网登录")
-                {
-                    return CheckResult::NeedLogin;
-                }
-                if content_lower.contains("百度一下")
-                    || content_lower.contains("baidu")
-                    || content_lower.contains("百度")
-                {
-                    return CheckResult::Connected;
-                }
+            let mut buf = [0u8; 8192];
+            let n = response.read(&mut buf).unwrap_or(0);
+            let slice = &buf[..n];
+            // 使用 lossy 解码兼容 UTF-8 和 GBK/GB2312 编码的登录页
+            let content_lower = String::from_utf8_lossy(slice).to_lowercase();
+            if content_lower.contains("portal")
+                || content_lower.contains("drcom")
+                || content_lower.contains("inode")
+                || content_lower.contains("eportal")
+                || content_lower.contains("srun")
+                || content_lower.contains("wlanuserip")
+                || content_lower.contains("认证")
+                || content_lower.contains("登录")
+            {
+                return CheckResult::NeedLogin;
             }
-            return CheckResult::Connected;
+            // generate_204 返回了非 204 且非预期的 200 页面，视为被 Portal 劫持
+            return CheckResult::NeedLogin;
         }
         CheckResult::Error
     })
@@ -1425,13 +1408,15 @@ fn generate_uuid() -> String {
     let pid = std::process::id() as u128;
     let mut val = nanos ^ (pid << 64) ^ 0x9e3779b97f4a7c15_u128;
     val = val.wrapping_mul(0xbf58476d1ce4e5b9_u128) ^ (val >> 30);
-    let bytes = val.to_be_bytes();
+    let mut bytes = val.to_be_bytes();
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4 (RFC 4122)
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant 1 (RFC 4122)
     format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-4{:01x}{:02x}-{:01x}{:01x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
         bytes[0], bytes[1], bytes[2], bytes[3],
         bytes[4], bytes[5],
-        bytes[6] & 0x0f, bytes[7],
-        (bytes[8] & 0x3f) | 0x80 >> 4, bytes[8] & 0x0f, bytes[9],
+        bytes[6], bytes[7],
+        bytes[8], bytes[9],
         bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
     )
 }
@@ -1447,7 +1432,7 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 let line = line.trim();
-                if line.starts_with("Name") && line.contains(':') {
+                if (line.starts_with("Name") || line.starts_with("名称")) && line.contains(':') {
                     if let Some(val) = line.splitn(2, ':').nth(1) {
                         let n = val.trim();
                         if !n.is_empty() { iface_name = n.to_string(); }
@@ -1477,6 +1462,25 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
                         if !addr.is_empty() && !addr.starts_with("169.254") && addr != "127.0.0.1" {
                             ip = Some(addr);
                             break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 兜底：若按网卡名未查询到 IP，遍历所有 IPv4 地址寻找非回环、非保留的首个活动 IP
+        if ip.is_none() {
+            if let Ok(output) = hidden_command("netsh").args(["interface", "ipv4", "show", "addresses"]).output() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    let line = line.trim();
+                    if (line.starts_with("IP Address") || line.starts_with("IP 地址") || line.starts_with("IPv4 地址")) && line.contains(':') {
+                        if let Some(val) = line.splitn(2, ':').nth(1) {
+                            let addr = val.trim().to_string();
+                            if !addr.is_empty() && !addr.starts_with("169.254") && addr != "127.0.0.1" {
+                                ip = Some(addr);
+                                break;
+                            }
                         }
                     }
                 }
@@ -1581,6 +1585,7 @@ async fn native_direct_login() -> Result<String, String> {
 
     let client = reqwest::Client::builder()
         .no_proxy()
+        .connect_timeout(std::time::Duration::from_millis(2000))
         .timeout(std::time::Duration::from_secs(6))
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -1599,6 +1604,18 @@ async fn native_direct_login() -> Result<String, String> {
         .map_err(|e| format!("网络请求失败: {}", e))?;
 
     let elapsed = start_instant.elapsed().as_millis();
+
+    // 检查是否发生 302 重定向至登录成功页面
+    if resp.status().is_redirection() {
+        if let Some(loc) = resp.headers().get("location") {
+            if let Ok(loc_str) = loc.to_str() {
+                if loc_str.contains("success") || loc_str.contains("portal.do") {
+                    return Ok(format!("[+] 认证成功 (302 跳转, 耗时 {} ms): {}", elapsed, loc_str));
+                }
+            }
+        }
+    }
+
     let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
 
     // 解析 JSON 响应
@@ -1621,6 +1638,8 @@ async fn native_direct_login() -> Result<String, String> {
             } else {
                 Err(format!("[!] 认证失败: {} (code: 1, 耗时 {} ms)", if msg.is_empty() { "账号或密码错误" } else { msg }, elapsed))
             }
+        } else if code_str == "44" {
+            Err(format!("[!] 认证被拒绝 (非法接入/VLAN绑定冲突, code: 44, 耗时 {} ms): {}", elapsed, msg))
         } else {
             Err(format!("[!] 认证异常 (code: {}, 耗时 {} ms): {}", code_str, elapsed, msg))
         }
@@ -1642,8 +1661,13 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             return Ok(format!("登录成功 (Rust 原生直发):\n{}", msg));
         }
         Err(e) => {
-            // 如果是明确的服务端业务拒绝（账号不存在、密码错误、设备状态），直接返回真实原因给用户
-            if e.contains("账号或密码错误") || e.contains("账号不存在") || e.contains("设备不在正常状态") {
+            // 如果是明确的服务端业务拒绝（账号不存在、密码错误、设备状态、code 44），直接返回真实原因给用户
+            if e.contains("账号或密码错误")
+                || e.contains("账号不存在")
+                || e.contains("设备不在正常状态")
+                || e.contains("code: 44")
+                || e.contains("非法接入")
+            {
                 log::warn!("[native_direct_login] 认证未通过: {}", e);
                 return Err(format!("校园网登录失败:\n{}", e));
             }

@@ -76,9 +76,16 @@ def main() -> int:
         import urllib.request
         import urllib.error
 
+        # 禁用 302 重定向跟随 (与 C# AllowAutoRedirect=false / PS -MaximumRedirection 0 语义一致)
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+            def http_error_302(self, req, fp, code, msg, headers):
+                return fp
+            http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
         # 禁用代理, 直连 (与 PS -Proxy $null / C# req.Proxy=null 一致)
         opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
+            NoRedirectHandler(),
         )
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
@@ -89,17 +96,26 @@ def main() -> int:
             headers["Referer"] = url.split("/quickauth.do")[0] + "/portal.do"
         req = urllib.request.Request(url, headers=headers)
 
+        def _output_body(raw_bytes: bytes, ctype: str):
+            text = decode_body(raw_bytes, ctype)
+            try:
+                sys.stdout.buffer.write(text.encode("utf-8"))
+                sys.stdout.buffer.flush()
+            except Exception:
+                sys.stdout.write(text)
+                sys.stdout.flush()
+
         try:
             with opener.open(req, timeout=6) as resp:
                 raw = resp.read()
                 content_type = resp.headers.get("Content-Type", "")
-                sys.stdout.write(decode_body(raw, content_type))
+                _output_body(raw, content_type)
                 return 0
         except urllib.error.HTTPError as e:
             # 4xx/5xx: 拿 body 交给主脚本判定, 算"发出去了"
             raw = e.read()
             content_type = e.headers.get("Content-Type", "")
-            sys.stdout.write(decode_body(raw, content_type))
+            _output_body(raw, content_type)
             return 0
     except Exception as ex:  # noqa: BLE001 - 保底层要兜住一切异常
         sys.stderr.write("[sender] 请求失败: %s\n" % ex)

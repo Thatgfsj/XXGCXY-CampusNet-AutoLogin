@@ -32,6 +32,12 @@ class XywdlSender
 {
     static int Main(string[] args)
     {
+        try
+        {
+            Console.OutputEncoding = Encoding.UTF8;
+        }
+        catch { }
+
         string url;
         if (args.Length > 0)
         {
@@ -49,15 +55,26 @@ class XywdlSender
             return 2;
         }
 
-        // 剥掉可能的 BOM (U+FEFF): PS 管道用带 BOM 的 UTF8 编码传字符串时,
-        // 原生进程会收到开头的 BOM 字符, 不剥掉会导致 WebRequest 报"URI 方案无效"
-        url = url.Trim().TrimStart('\uFEFF');
+        // 剥掉可能的 BOM (U+FEFF) 以及前置空白
+        url = url.Trim();
+        while (url.Length > 0 && (url[0] == '\uFEFF' || char.IsWhiteSpace(url[0])))
+        {
+            url = url.TrimStart('\uFEFF').Trim();
+        }
 
         try
         {
+            try
+            {
+                // 启用 TLS 1.1 / TLS 1.2 (兼容老系统)
+                ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072 | (SecurityProtocolType)768;
+            }
+            catch { }
+
             ServicePointManager.Expect100Continue = false;
             HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = "GET";
+            req.KeepAlive = false;
             req.Proxy = null;                 // 直连, 绕开系统代理
             req.Timeout = 6000;              // 连接超时 6 秒 (校园网内网极速响应, 杜绝长时间假死挂起)
             req.ReadWriteTimeout = 6000;     // 读响应超时 6 秒
