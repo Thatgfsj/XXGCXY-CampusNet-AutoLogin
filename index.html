@@ -849,7 +849,7 @@
             <div class="app-brand">
                 <div class="app-logo-badge">📶</div>
                 <div class="app-title-group">
-                    <h1>校园网助手 <span class="app-ver-pill">v2.0.8</span></h1>
+                    <h1>校园网助手 <span class="app-ver-pill">v2.0.9</span></h1>
                 </div>
             </div>
             <button class="header-btn" onclick="showSetup()">
@@ -1190,11 +1190,13 @@
             if (checkIntervalId) {
                 clearInterval(checkIntervalId);
             }
+            // 限制心跳间隔：默认 15 秒，上限 60 秒，防止过长间隔导致断网自愈迟缓
+            const sec = (config.check_interval && config.check_interval <= 60 && config.check_interval >= 5) ? config.check_interval : 15;
             checkIntervalId = setInterval(async () => {
                 if (autoCheckEnabled) {
                     await checkNetwork();
                 }
-            }, config.check_interval * 1000);
+            }, sec * 1000);
         }
         
         // 切换自动检测
@@ -1340,15 +1342,15 @@
                         return;
                     }
                     if (retryStatus.needs_login) {
-                        addLog('重连后需要登录校园网...');
                         const now = Date.now();
-                        if (now - lastLoginTime >= 5000) {
+                        if (now - lastLoginTime >= 4000) {
+                            addLog('[*] 重连后需要登录校园网，正在执行登录...');
                             await runLoginScript();
                         }
                     } else if (retryStatus.wifi_connected) {
                         // WiFi已连接但无法获取IP或网络尚未就绪
                         addLog('WiFi已连接，等待网络就绪...');
-                        await sleep(5000);
+                        await sleep(3000);
                         const finalStatus = await invoke('check_network');
                         updateStatus(finalStatus);
                     }
@@ -1356,14 +1358,14 @@
                 }
                 
                 if (status.needs_login) {
-                    // 检查是否刚登录过（10秒内）
                     const now = Date.now();
-                    if (now - lastLoginTime < 5000) {
-                        console.log('刚登录过，跳过重复登录');
+                    if (now - lastLoginTime < 4000) {
+                        console.log('刚登录过，冷却中');
                         return;
                     }
-                    addLog('需要登录校园网，正在执行登录...');
+                    addLog('[*] 检测到需要校园网 Web 认证，正在发起登录...');
                     await runLoginScript();
+                    return;
                 }
             } catch (e) {
                 addLog('检测网络失败: ' + e);
@@ -1573,54 +1575,28 @@
                 addLog('正在执行登录脚本...');
                 const result = await invoke('run_login_script');
                 addLog(result);
-                await sleep(3000);  // 等待网络生效
+                await sleep(2000);  // 等待网络生效
                 
                 // 登录后重新检测
                 const status = await invoke('check_network');
                 updateStatus(status);
                 if (status.internet_ok) {
-                    addLog('网络已恢复正常');
+                    addLog('[+] 网络已恢复正常');
                 } else {
-                    addLog('登录后仍无法上网，请检查账号密码');
+                    addLog('[!] 登录后仍无法上网，请检查账号密码');
                 }
             } catch (e) {
-                addLog('登录失败: ' + e);
-                isLoggingIn = false;  // 失败时立即重置，允许重试
-                // 登录失败后等待30秒重试 (校园网 AC 限频保护, 太频繁会被服务器拒)
-                addLog('将在30秒后重试登录...');
-                setTimeout(async () => {
-                    isLoggingIn = false;
-                    if (autoCheckEnabled) {
-                        addLog('正在重试登录...');
-                        try {
-                            const result = await invoke('run_login_script');
-                            addLog(result);
-                            await sleep(3000);
-                            const status = await invoke('check_network');
-                            updateStatus(status);
-                            if (status.internet_ok) {
-                                addLog('重试登录成功，网络已恢复正常');
-                            } else {
-                                addLog('重试登录后仍无法上网，请手动检查');
-                            }
-                        } catch (e2) {
-                            addLog('重试登录失败: ' + e2);
-                        }
-                    }
-                }, 30000);
+                addLog('[!] 登录失败: ' + e);
             } finally {
-                // 只有登录成功时才延迟重置，防止短时间内重复登录
-                if (isLoggingIn) {
-                    setTimeout(() => {
-                        isLoggingIn = false;
-                    }, 30000);
-                }
+                // 登录执行完毕后立即释放登录锁，绝不堵塞网络检测与手动操作
+                isLoggingIn = false;
             }
         }
         
         // 立即检测
         async function checkNow() {
             addLog('正在检测网络...');
+            isLoggingIn = false; // 用户主动点立即检测时，清除卡滞锁
             const gauge = document.getElementById('gaugeCard');
             if (gauge) {
                 gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected');

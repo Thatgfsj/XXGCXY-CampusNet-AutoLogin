@@ -80,13 +80,17 @@ def main() -> int:
         opener = urllib.request.build_opener(
             urllib.request.ProxyHandler({}),
         )
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "XXGCXY-CampusNet-AutoLogin/2.0",
-            "Accept": "text/html,application/json,*/*",
-        })
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        }
+        if "/quickauth.do" in url:
+            headers["Referer"] = url.split("/quickauth.do")[0] + "/portal.do"
+        req = urllib.request.Request(url, headers=headers)
 
         try:
-            with opener.open(req, timeout=30) as resp:
+            with opener.open(req, timeout=6) as resp:
                 raw = resp.read()
                 content_type = resp.headers.get("Content-Type", "")
                 sys.stdout.write(decode_body(raw, content_type))

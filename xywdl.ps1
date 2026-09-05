@@ -592,10 +592,17 @@ function Invoke-CampusLogin {
     $sendSource = ""
     $sendErrors = @()
 
-    # 4.1 第 1 层: PowerShell Invoke-WebRequest (默认主力)
+    # 4.1 第 1 层: PowerShell Invoke-WebRequest (默认主力, 模拟主流浏览器标头防 WAF/AC 意外掐线)
     Write-Host "    [L1] PowerShell..." -ForegroundColor Gray
     try {
-        $response = Invoke-WebRequest -Uri $requestUrl -Method Get -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop -Proxy $null
+        [System.Net.ServicePointManager]::Expect100Continue = $false
+        $browserHeaders = @{
+            "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+            "Accept-Language" = "zh-CN,zh;q=0.9,en;q=0.8"
+            "Referer" = $cleanBase
+        }
+        $response = Invoke-WebRequest -Uri $requestUrl -Method Get -Headers $browserHeaders -UseBasicParsing -TimeoutSec 6 -ErrorAction Stop -Proxy $null
         $body = $response.Content
         $sendSource = "PowerShell (Invoke-WebRequest)"
         Write-Host "    [L1] 成功 ($($body.Length) 字符)" -ForegroundColor Green

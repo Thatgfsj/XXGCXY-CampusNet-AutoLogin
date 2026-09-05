@@ -246,11 +246,11 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.8
-          name: v2.0.8 - 校园网自动登录助手
+          tag_name: v2.0.9
+          name: v2.0.9 - 校园网自动登录助手
           make_latest: true
           body: |
-            v2.0.8 - 校园网自动登录助手
+            v2.0.9 - 校园网自动登录助手
 
             ## 系统要求
 
@@ -261,16 +261,24 @@ jobs:
             ## 下载
 
             **Windows (系统 PowerShell 5.1+, 体积小)**
-            - `xxgcxy-wifi_2.0.8_x64-setup.exe` - NSIS installer (~5 MB)
-            - `xxgcxy-wifi_2.0.8_x64_zh-CN.msi` - MSI installer (~6 MB)
+            - `xxgcxy-wifi_2.0.9_x64-setup.exe` - NSIS installer (~5 MB)
+            - `xxgcxy-wifi_2.0.9_x64_zh-CN.msi` - MSI installer (~6 MB)
 
             **Linux**
-            - `xxgcxy-wifi_2.0.8_amd64.deb` - Debian/Ubuntu package
-            - `xxgcxy-wifi-v2.0.8-x86_64-linux.tar.gz` - Generic Linux tarball
-            - `xxgcxy-wifi-2.0.8-1.x86_64.rpm` - RPM package (converted from deb)
+            - `xxgcxy-wifi_2.0.9_amd64.deb` - Debian/Ubuntu package
+            - `xxgcxy-wifi-v2.0.9-x86_64-linux.tar.gz` - Generic Linux tarball
+            - `xxgcxy-wifi-2.0.9-1.x86_64.rpm` - RPM package (converted from deb)
 
             **Cross-platform**
             - `xywdl.sh` - Standalone shell script (Linux/macOS, needs curl or python3)
+
+            ## What's New in v2.0.9
+
+            ### ⚡ 认证极速响应与卡死假死彻底根治 (Speed & Responsiveness)
+            - **模拟主流浏览器标头 (防 AC/WAF 掐线)**: 认证请求（PowerShell / C# / Python 三层）统一注入标准 Chrome 浏览器标头与中文语言环境，彻底解决校园网 AC/WAF 防火墙误判并重置连接（“基础连接已经关闭: 连接被意外关闭” / “Remote end closed connection without response”）的问题，实现与浏览器手动登录相同的秒级连通。
+            - **内网超时从 30s 缩短至 6s**: 针对校园网内网环境，单层超时收紧至 6 秒，彻底消除原三层降级累加长达 90 秒的假死与两分钟无法联网问题。
+            - **解除前端 30 秒全局死锁**: 移除前端登录后粗暴的 30 秒阻塞锁，登录完成立即释放状态，用户点击“立即检测并重连”秒级响应，告别“一分钟没反应一直不动”。
+            - **日志防抖与 SSID 容错**: 消除多重“重连后需要登录校园网...”冗余日志，SSID 匹配全面兼容大小写，心跳定时器智能自适应。
 
             ## What's New in v2.0.8
 
@@ -290,22 +298,12 @@ jobs:
             - **支持字母账号 (补卡/工号无忧)**: 解除纯数字限制，完美支持字母与数字组合（如补卡后缀 `ls` / `lls`、前缀字母学号），输入误含 `@` 自动智能剥离。
             - **开机自启彻底静默保活**: 注册表注入 `--autostart` 标志且初始窗口不可见，电脑开机重启后绝对静默驻留系统托盘，彻底告别弹窗打扰。
 
-            ## What's New in v2.0.5
-
-            ### 稳定性与强健性加固 (Robustness & Bug Fixes)
-            - **消除多余空白日志**: 修复前端 `addLog` 缺乏空白过滤导致的重复时间戳空白行问题，优化排版。
-            - **四重 BaseURL 防御性净化**: 彻底解决粘贴重定向长 URL 导致双问号 `??` 丢失账号密码、报“设备不在正常状态”的问题。
-            - **精准响应判定**: 支持 JSON 反序列化解析，兼容字符串/数字形式 code，直接展示服务端真实错误原因，杜绝误报未知错误 99。
-            - **网络就绪防抢跑**: 过滤 `169.254.*` 临时 IP，新增 DHCP 延迟就绪等待。
-            - **UTF-8 BOM 修复**: 确保 PowerShell 5.1 在纯净环境下的中文字符安全解析。
-
             ## 升级说明
 
             从旧版本升级：
-            1. 直接下载安装最新的 v2.0.8 安装包覆盖安装即可
+            1. 直接下载安装最新的 v2.0.9 安装包覆盖安装即可
             2. 现有账号与 WiFi 配置自动保留
-            3. 若之前遇到“设备不在正常状态”或“未知错误 99”，升级后即可正常通过认证并在界面显示清晰提示
-            3. 若之前因 MAC/SSID 留空无法登录, 升级后即可正常登录
+            3. 若之前遇到连接过慢、卡在待认证或被意外掐线，升级后即可极速恢复秒登
           files: |
             artifacts/windows/*.exe
             artifacts/windows/*.msi

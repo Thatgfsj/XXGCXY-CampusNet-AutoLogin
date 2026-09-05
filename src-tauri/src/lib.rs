@@ -1203,12 +1203,12 @@ async fn check_internet() -> bool {
 // ============= 带重试的互联网检测 =============
 
 async fn check_internet_with_retry() -> bool {
-    for i in 0..3 {
+    for i in 0..2 {
         if check_internet().await {
             return true;
         }
-        if i < 2 {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if i < 1 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     }
     false
@@ -1225,7 +1225,7 @@ async fn check_url(url: &str) -> CheckResult {
     let result = tokio::task::spawn_blocking(move || {
         let client = match reqwest::blocking::Client::builder()
             .no_proxy()
-            .timeout(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(2))
             .redirect(reqwest::redirect::Policy::none())
             .build()
         {
@@ -1305,15 +1305,18 @@ async fn check_network(state: tauri::State<'_, AppState>) -> Result<NetworkStatu
     let config = state.config.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let wifi_connected = get_connected_wifi();
     let internet_ok = check_internet_with_retry().await;
+    let is_matched_ssid = |cur: &str, target: &str| -> bool {
+        !target.is_empty() && cur.eq_ignore_ascii_case(target)
+    };
+    let connected_matches = match &wifi_connected {
+        Some(ssid) => is_matched_ssid(ssid, &config.primary_ssid) || is_matched_ssid(ssid, &config.backup_ssid),
+        None => false,
+    };
     let needs_reconnect = wifi_connected.is_none()
-        || (!config.primary_ssid.is_empty()
-            && wifi_connected.as_ref() != Some(&config.primary_ssid)
-            && wifi_connected.as_ref() != Some(&config.backup_ssid));
+        || (!config.primary_ssid.is_empty() && !connected_matches);
     let needs_login = wifi_connected.is_some()
         && !internet_ok
-        && !config.primary_ssid.is_empty()
-        && (wifi_connected.as_ref() == Some(&config.primary_ssid)
-            || wifi_connected.as_ref() == Some(&config.backup_ssid));
+        && (!config.primary_ssid.is_empty() && connected_matches);
     Ok(NetworkStatus {
         wifi_connected,
         internet_ok,

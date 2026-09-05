@@ -55,14 +55,21 @@ class XywdlSender
 
         try
         {
+            ServicePointManager.Expect100Continue = false;
             HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
             req.Method = "GET";
             req.Proxy = null;                 // 直连, 绕开系统代理
-            req.Timeout = 30000;              // 连接超时 (毫秒)
-            req.ReadWriteTimeout = 30000;     // 读响应超时 (毫秒)
+            req.Timeout = 6000;              // 连接超时 6 秒 (校园网内网极速响应, 杜绝长时间假死挂起)
+            req.ReadWriteTimeout = 6000;     // 读响应超时 6 秒
             req.AllowAutoRedirect = false;    // 不跟随重定向, 看原始响应
-            req.UserAgent = "XXGCXY-CampusNet-AutoLogin/2.0";
-            req.Accept = "text/html,application/json,*/*";
+            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+            req.Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8";
+            req.Headers.Add("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+            int qIdx = url.IndexOf("/quickauth.do");
+            if (qIdx > 0)
+            {
+                req.Referer = url.Substring(0, qIdx) + "/portal.do";
+            }
 
             HttpWebResponse resp = (HttpWebResponse)req.GetResponse();
             using (resp)

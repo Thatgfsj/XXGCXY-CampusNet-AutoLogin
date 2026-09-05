@@ -200,7 +200,9 @@ RESPONSE=""
 if curl --version >/dev/null 2>&1; then
     log_info "    [L1] curl..."
     HTTP_CODE=$(curl -s -o /tmp/xywdl_response.txt -w "%{http_code}" \
-        --max-redirs 0 --noproxy '*' --max-time 30 \
+        -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
+        -e "${AUTH_URL%/quickauth.do}/portal.do" \
+        --max-redirs 0 --noproxy '*' --max-time 6 \
         "$REQUEST_URL" 2>/dev/null || echo "000")
     # 000 = 连接层失败; 4xx/5xx 也算"发出去了", body 交给判定
     if [[ "$HTTP_CODE" != "000" ]]; then
