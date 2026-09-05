@@ -132,6 +132,10 @@ npx @tauri-apps/cli build
 
 ## 更新日志
 
+- **v2.2.3**：**Hero Gauge 绝对几何中心重构与全视口高 DPI 自适应加固**：
+  1. **SVG `<g>` 分组与绝对同心圆中心锚定**：动态圆环由 `<g class="radar-meter-group">` 独立包裹，显式声明 `transform-origin: 70px 70px; transform-box: view-box;`，使背景轨道圆环静止，动态扫描环在底层严格以 `(70, 70)` 为绝对原点进行 100% 纯正同心旋转；
+  2. **中心内容绝对坐标层解耦（消除 6px 视觉重心偏移）**：重构 `.radar-center-content` 为绝对定位遮罩，`.status-icon` 通过 `top: 50%; left: 50%; transform: translate(-50%, -50%)` 绝对锚定在 `(70px, 70px)` 几何中心，脉冲呼吸点脱离 Flex 竖向排列并以 CSS 变量 `--dot-color` 驱动，彻底消除了下方小点对图标向上的挤压偏移；
+  3. **高 DPI 与弹性布局防御**：为 `.toggle-switch` 添加 `flex-shrink: 0` 杜绝 125%/150% 缩放下开关被挤压形变；为 `.network-pill` 增加 `min-width: 0` 防止超长 SSID 挤爆 CSS Grid 单元格；为 `filter` 光晕增加平滑过渡与 GPU 图层隔离。
 - **v2.2.2**：**实机全链路真实环境闭环验证与多发送器真实互通认证**：
   1. **实机真实网络联调与认证闭环**：基于用户实机真实无线网卡（Realtek RTL8852BE WiFi 6，已连 `XinKe_Hist_Stu`，IP `10.4.124.192`）与实际校园网网关（`172.18.252.12:6060`）实测，真实 DPAPI 解密与网络交互全链路 100% 连通；
   2. **三层发送器（PowerShell / C# / Python）实战全量通过**：在实际机器上直接驱动 PowerShell (548ms)、C# 原生独立发送器 (1158ms)、Python 3 标准库发送器 (273ms) 真实请求校园网认证接口，三端均成功获得网关返回 `code: "0", message: "认证成功"`；

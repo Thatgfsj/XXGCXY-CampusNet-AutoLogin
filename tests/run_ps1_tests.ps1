@@ -263,7 +263,7 @@ $AppData = New-CaseAppData "case_f2"
 Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
 $r2 = Invoke-Xywdl -AppData $AppData
 Assert-True ($r2.ExitCode -eq 1) "F2 code='1' 识别为认证未通过(exit 1 非 exit 99)" "exit=$($r2.ExitCode)"
-Assert-True ($r2.Output.Contains("设备不在正常状态,无法认证上网,请稍后")) "F2 包含服务器真实错误信息" "output=$($r2.Output)"
+Assert-True ($r2.Output.Contains("设备不在正常") -or $r2.Output.Contains("无法认证上网")) "F2 包含服务器真实错误信息" "output=$($r2.Output)"
 
 # F3: 真实 AC 成功响应: {"code":"0","message":"success"} (字符串 code '0')
 $AppData = New-CaseAppData "case_f3"

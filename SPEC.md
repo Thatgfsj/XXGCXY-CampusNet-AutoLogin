@@ -216,3 +216,4 @@ wifi/
 30. ✅ **(v2.2.0+)** 恢复历史发布命名规范（xxgcxy-wifi）与 Windows 原生中文名及快捷方式（新乡工程校园网保活.exe）：统一发布产物前缀、NSIS 安装后置自动重命名为中文名、重构桌面与开始菜单快捷方式、Rust 后端双向兼容无缝接管与开机自启动注册表适配
 31. ✅ **(v2.2.1+)** Hero Gauge 动画中心化与几何修复，全链路 UTF-8 BOM 过滤与自动化保活联网双重保障：修复 SVG 仪表盘 `stroke-dasharray` 缝隙及旋转偏心晃动、Rust 配置读取与启动状态机挂载 `strip_bom`、空 SSID 容错与无外网主动触发 Web Portal 认证、手动探测冷却计时即时归零
 32. ✅ **(v2.2.2+)** 实机全链路真实网络环境闭环验证与三层发送器（PowerShell/C#/Python）实测通关：真实 WLAN/IP/MAC 抓取与 DPAPI 动态解密实测、三层发送器真实网关请求与 code=0 响应互通验证、C# 编译器本地无缝重编译与 BSSID 防御性守卫
+33. ✅ **(v2.2.3+)** Hero Gauge 绝对同心圆中心锚定与高 DPI 弹性布局防御：SVG <g> 显式 transform-origin 70px 70px 独立旋转、中心图标绝对定位消解 6px 视觉重心偏差、flex-shrink:0 与 min-width:0 防形变溢出、filter 光晕平滑过渡

@@ -1,6 +1,6 @@
 {
   "name": "xxgcxy-wifi",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "校园网自动重连工具",
   "scripts": {
     "dev": "vite",

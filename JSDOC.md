@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.2.2 |
+| **当前版本** | 2.2.3 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -1308,5 +1308,21 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 
 #### 3. 网络解析防御性前缀守卫
 - 在 `get_connected_wifi` 中加入 `!line.starts_with("BSSID")` 前缀守卫，彻底避免复杂多网卡输出时的字符串匹配隐患。
+
+### 12.16 v2.2.3 Hero Gauge 绝对同心圆中心重构与高 DPI 弹性布局防御
+
+#### 1. SVG `<g>` 容器与绝对旋转中心锁死
+- 将动态雷达仪表圆环由 `<g class="radar-meter-group">` 独立包裹，显式配置 `transform-origin: 70px 70px; transform-box: view-box;`。
+- 底层背景轨道圆环保持静止，仅动态仪表环绕精确几何中心 `(70, 70)` 进行 100% 绝对同心旋转，避免全 SVG 旋转导致的重绘与潜在 DPI 计算误差。
+
+#### 2. 中心内容绝对坐标层解耦与 6px 视觉重心偏移修正
+- 重构 `.radar-center-content` 为绝对覆盖遮罩，`.status-icon` 通过 `top: 50%; left: 50%; transform: translate(-50%, -50%)` 绝对锚定在 `(70px, 70px)` 几何中心。
+- 脉冲呼吸点脱离与图标的竖向 Flex 排列，置于圆环下方并由 CSS 变量 `--dot-color` 驱动，彻底消除了原布局中呼吸点对图标向上的 6px 挤压偏移。
+
+#### 3. 高 DPI 缩放与网格弹性自适应加固
+- 为 `.toggle-switch` 添加 `flex-shrink: 0`，防止在 125%/150% 放大或窄视口下开关被文字挤压形变。
+- 为 `.network-pill` 添加 `min-width: 0`，消除超长 SSID 撑爆 CSS Grid 网格单元格的潜在隐患。
+- 为 `.radar-meter-circle` 补充 `filter 0.4s ease` 过渡，消除光晕硬切。
+
 
 
