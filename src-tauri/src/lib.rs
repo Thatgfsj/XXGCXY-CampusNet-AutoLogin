@@ -543,7 +543,10 @@ async fn run_login_with_profile(app: AppHandle) -> Result<String, String> {
     let state = app.state::<AppState>();
     let _guard = state.is_logging_in.try_lock()
         .map_err(|_| "当前已有认证流程正在执行，请勿重复操作".to_string())?;
-    execute_login_flow(&app).await
+    let result = execute_login_flow(&app, None).await;
+    // 立即广播登录结果状态, 避免 UI 等到下一个检测周期才刷新
+    emit_login_result_status(&app, &result).await;
+    result
 }
 
 // ============= DPAPI 密码加密 =============
@@ -1343,38 +1346,69 @@ async fn get_connected_wifi_async() -> Option<String> {
 
 // ============= 检测互联网连接 =============
 
-async fn check_internet() -> bool {
+/// 单轮探测的汇总结果
+/// - Online: 任一探针返回 204, 直通外网
+/// - NeedLogin: 任一探针被劫持, 携带 302 Location (探测即取参, 可能为空)
+/// - Offline: 全部探针失败
+enum ProbeOutcome {
+    Online,
+    NeedLogin(String),
+    Offline,
+}
+
+/// 两个探针端点并发探测 (避免串行累计超时): 任一 204 即在线; 任一 3xx 即需登录; 全部 Error 才算本轮失败
+async fn check_internet_concurrent() -> ProbeOutcome {
     // 优先使用国内高可用 HTTP 204 探针检测（避免 HTTPS 绕过 captive portal）
-    match check_url("http://connect.rom.miui.com/generate_204").await {
-        CheckResult::Connected => return true,
-        CheckResult::NeedLogin => return false,
-        CheckResult::Error => {}
+    let (a, b) = tokio::join!(
+        check_url("http://connect.rom.miui.com/generate_204"),
+        check_url("http://connectivitycheck.platform.hicloud.com/generate_204"),
+    );
+    // 判定顺序: 先看有没有 204 (在线), 再看有没有 3xx (需认证), 最后才是全部失败
+    if matches!(a, CheckResult::Connected) || matches!(b, CheckResult::Connected) {
+        return ProbeOutcome::Online;
     }
-    match check_url("http://connectivitycheck.platform.hicloud.com/generate_204").await {
-        CheckResult::Connected => return true,
-        CheckResult::NeedLogin => return false,
-        CheckResult::Error => {}
+    match (a, b) {
+        (CheckResult::NeedLogin(l1), CheckResult::NeedLogin(l2)) => {
+            ProbeOutcome::NeedLogin(if l1.is_empty() { l2 } else { l1 })
+        }
+        (CheckResult::NeedLogin(l), _) | (_, CheckResult::NeedLogin(l)) => ProbeOutcome::NeedLogin(l),
+        _ => ProbeOutcome::Offline,
     }
-    false
 }
 
 // ============= 带重试的互联网检测 =============
 
 async fn check_internet_with_retry() -> bool {
+    matches!(check_internet_with_retry_detailed().await, ProbeOutcome::Online)
+}
+
+/// 带重试探测 (重试语义与旧版一致: 最多 2 轮, 轮间 500ms), 并带回任一轮 NeedLogin 的 302 Location
+async fn check_internet_with_retry_detailed() -> ProbeOutcome {
+    let mut first_loc: Option<String> = None;
     for i in 0..2 {
-        if check_internet().await {
-            return true;
+        match check_internet_concurrent().await {
+            ProbeOutcome::Online => return ProbeOutcome::Online,
+            ProbeOutcome::NeedLogin(loc) => {
+                if first_loc.is_none() {
+                    first_loc = Some(loc);
+                }
+            }
+            ProbeOutcome::Offline => {}
         }
         if i < 1 {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     }
-    false
+    match first_loc {
+        Some(loc) => ProbeOutcome::NeedLogin(loc),
+        None => ProbeOutcome::Offline,
+    }
 }
 
+/// 单探针结果; NeedLogin 携带被劫持响应的 302 Location (200 页面劫持时为空)
 enum CheckResult {
     Connected,
-    NeedLogin,
+    NeedLogin(String),
     Error,
 }
 
@@ -1399,8 +1433,15 @@ async fn check_url(url: &str) -> CheckResult {
 
         // 1. 对于 generate_204 探测端点，正常联网绝不发生 3xx 重定向
         // 发生重定向即 100% 代表被内网网关或 Captive Portal 劫持
+        // Location 顺路带回, 供认证流程"探测即取参", 省去独立嗅探
         if status.is_redirection() {
-            return CheckResult::NeedLogin;
+            let location = response
+                .headers()
+                .get("location")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            return CheckResult::NeedLogin(location);
         }
 
         // 2. 正常 204 无内容响应，表示直通外网
@@ -1425,10 +1466,10 @@ async fn check_url(url: &str) -> CheckResult {
                 || content_lower.contains("认证")
                 || content_lower.contains("登录")
             {
-                return CheckResult::NeedLogin;
+                return CheckResult::NeedLogin(String::new());
             }
             // generate_204 返回了非 204 且非预期的 200 页面，视为被 Portal 劫持
-            return CheckResult::NeedLogin;
+            return CheckResult::NeedLogin(String::new());
         }
         CheckResult::Error
     })
@@ -1451,6 +1492,29 @@ pub struct SniffedParams {
     pub wlan_ac_name: Option<String>,
     pub wlan_ac_ip: Option<String>,
     pub hostname: Option<String>,
+}
+
+/// 将 302 Location URL 解析为 SniffedParams (独立嗅探与"探测即取参"两处共用)
+fn parse_portal_location(loc: &str) -> Option<SniffedParams> {
+    let parsed = url::Url::parse(loc).ok()?;
+    let mut sniffed = SniffedParams::default();
+    let mut base = parsed.clone();
+    base.set_query(None);
+    base.set_fragment(None);
+    sniffed.base_url = Some(base.to_string());
+
+    for (k, v) in parsed.query_pairs() {
+        match k.to_ascii_lowercase().as_str() {
+            "wlanuserip" => sniffed.wlan_user_ip = Some(v.to_string()),
+            "mac" => sniffed.mac_address = Some(v.to_string()),
+            "vlan" => sniffed.vlan = Some(v.to_string()),
+            "wlanacname" => sniffed.wlan_ac_name = Some(v.to_string()),
+            "wlanacip" => sniffed.wlan_ac_ip = Some(v.to_string()),
+            "hostname" => sniffed.hostname = Some(v.to_string()),
+            _ => {}
+        }
+    }
+    Some(sniffed)
 }
 
 /// 发送禁止重定向的 HTTP 探测包，截获 302 Location 中的真实参数
@@ -1477,24 +1541,7 @@ async fn sniff_portal_params() -> Result<Option<SniffedParams>, String> {
             if resp.status().is_redirection() {
                 if let Some(loc) = resp.headers().get("location") {
                     if let Ok(loc_str) = loc.to_str() {
-                        if let Ok(parsed) = url::Url::parse(loc_str) {
-                            let mut sniffed = SniffedParams::default();
-                            let mut base = parsed.clone();
-                            base.set_query(None);
-                            base.set_fragment(None);
-                            sniffed.base_url = Some(base.to_string());
-
-                            for (k, v) in parsed.query_pairs() {
-                                match k.to_ascii_lowercase().as_str() {
-                                    "wlanuserip" => sniffed.wlan_user_ip = Some(v.to_string()),
-                                    "mac" => sniffed.mac_address = Some(v.to_string()),
-                                    "vlan" => sniffed.vlan = Some(v.to_string()),
-                                    "wlanacname" => sniffed.wlan_ac_name = Some(v.to_string()),
-                                    "wlanacip" => sniffed.wlan_ac_ip = Some(v.to_string()),
-                                    "hostname" => sniffed.hostname = Some(v.to_string()),
-                                    _ => {}
-                                }
-                            }
+                        if let Some(sniffed) = parse_portal_location(loc_str) {
                             return Ok(Some(sniffed));
                         }
                     }
@@ -1651,6 +1698,57 @@ fn emit_service_status(app: &AppHandle, status: &ServiceStatus) {
         *lock = status.clone();
     }
     let _ = app.emit("service-status-changed", status);
+}
+
+/// 状态机之外的登录入口 (保存并立即登录 / 手动立即登录信号) 完成认证后立即广播状态,
+/// 避免 UI 停留在旧状态 (如"未连接") 直到下一个检测周期才刷新
+async fn emit_login_result_status(app: &AppHandle, res: &Result<String, String>) {
+    let wifi = get_connected_wifi_async().await;
+    let timestamp_now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (state, consecutive, backoff_remaining_secs) = match res {
+        Ok(_) => (ServiceState::Connected, 0u32, 0u64),
+        Err(e) => {
+            if e.starts_with("BUSINESS_REJECTED") {
+                // 复用状态机的指数退避阶梯, 基数取共享状态里已记录的连续业务拒绝次数
+                let prev = app
+                    .state::<AppState>()
+                    .service_status
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .consecutive_business_errors;
+                let consecutive = prev.saturating_add(1);
+                let backoff_secs = match consecutive {
+                    1 => 15,
+                    2 => 30,
+                    3 => 60,
+                    4 => 120,
+                    _ => 300,
+                };
+                (
+                    ServiceState::Backoff {
+                        next_retry_secs: backoff_secs,
+                        reason: e.clone(),
+                    },
+                    consecutive,
+                    backoff_secs,
+                )
+            } else {
+                (ServiceState::NeedsLogin, 0u32, 0u64)
+            }
+        }
+    };
+    let internet_ok = matches!(state, ServiceState::Connected);
+    emit_service_status(app, &ServiceStatus {
+        state,
+        wifi_connected: wifi,
+        internet_ok,
+        last_check_time: timestamp_now,
+        consecutive_business_errors: consecutive,
+        backoff_remaining_secs,
+    });
 }
 
 // ============= 检测网络状态 =============
@@ -1843,7 +1941,8 @@ async fn get_wlan_network_info_async() -> (Option<String>, Option<String>, Optio
 }
 
 /// 进程内异步直发认证请求 (零外部脚本依赖，毫秒级响应)
-async fn native_direct_login() -> Result<String, String> {
+/// pre_sniffed: 离线探测阶段顺路带回并解析好的 302 参数, 非空时跳过独立嗅探
+async fn native_direct_login(pre_sniffed: Option<SniffedParams>) -> Result<String, String> {
     let mut profile = get_login_profile()?;
     if profile.user_id.is_empty() || profile.base_url.is_empty() {
         return Err("未配置校园网账号或 Portal URL".to_string());
@@ -1859,8 +1958,15 @@ async fn native_direct_login() -> Result<String, String> {
         return Err("解密密码为空，请在设置中重新保存账号密码".to_string());
     }
 
-    // 1. 登录前置强制取参：先发一次禁重定向的 HTTP 探测，302 就解析 Location 动态刷新参数
-    if let Ok(Some(sniffed)) = sniff_portal_params().await {
+    // 1. 登录前置强制取参：优先复用探测阶段顺路带回的 302 参数, 没有再发独立嗅探兜底
+    let sniffed_opt = match pre_sniffed {
+        Some(s) => Some(s),
+        None => match sniff_portal_params().await {
+            Ok(Some(s)) => Some(s),
+            _ => None,
+        },
+    };
+    if let Some(sniffed) = sniffed_opt {
         if apply_sniffed_params_to_profile(&mut profile, &sniffed) {
             let _ = save_login_profile_json(&profile);
         }
@@ -2016,14 +2122,20 @@ async fn native_direct_login() -> Result<String, String> {
 }
 
 /// 综合登录流水线：优先进程内极速直发，支持 code 44 自动重新嗅探重试，遇未知错误降级外部脚本
-async fn execute_login_flow(app: &AppHandle) -> Result<String, String> {
-    emit_backend_log(app, "[*] 开始执行校园网认证流程 (Rust 原生直发优先)...");
+/// probe_location: 离线探测时顺路带回的 302 Location, 可解析时直接复用跳过独立嗅探 (手动入口传 None)
+async fn execute_login_flow(app: &AppHandle, probe_location: Option<String>) -> Result<String, String> {
+    emit_backend_log(app, "[*] 开始自动认证...");
+
+    let mut pre_sniffed = probe_location.as_deref().and_then(parse_portal_location);
+    if pre_sniffed.is_some() {
+        emit_backend_log(app, "[*] 已复用探测阶段带回的 302 参数, 跳过独立嗅探");
+    }
 
     let mut attempt = 0;
     let mut native_res;
     loop {
         attempt += 1;
-        native_res = native_direct_login().await;
+        native_res = native_direct_login(pre_sniffed.take()).await;
         if let Err(ref e) = native_res {
             if e.starts_with("CODE_44_RETRY") && attempt == 1 {
                 emit_backend_log(app, "[!] 网关返回 code 44 (非法接入/会话失效)，正在强制 302 重新取参并重试一次...");
@@ -2045,16 +2157,26 @@ async fn execute_login_flow(app: &AppHandle) -> Result<String, String> {
 
     match native_res {
         Ok(msg) => {
-            emit_backend_log(app, &format!("[+] 原生直发成功: {}", msg));
+            emit_backend_log(app, &format!("[+] 认证成功 (Rust原生直发): {}", msg));
             Ok(msg)
         }
         Err(e) => {
             if e.starts_with("BUSINESS_REJECTED") {
-                emit_backend_log(app, &format!("[!] 认证被计费系统拒绝: {}", e));
+                emit_backend_log(app, &format!("[!] 认证失败 (Rust原生直发·业务拒绝): {}", e));
                 return Err(e);
             }
             emit_backend_log(app, &format!("[!] 原生直发未就绪: {}，正在调用外部脚本兜底...", e));
-            run_login_script(app.clone()).await
+            match run_login_script(app.clone()).await {
+                Ok(msg) => {
+                    // 脚本退出码无法区分 L1/L2/L3, 统一标注为外部脚本 (PowerShell)
+                    emit_backend_log(app, &format!("[+] 认证成功 (外部脚本·PowerShell): {}", msg));
+                    Ok(msg)
+                }
+                Err(script_err) => {
+                    emit_backend_log(app, &format!("[!] 认证失败 (外部脚本·PowerShell): {}", script_err));
+                    Err(script_err)
+                }
+            }
         }
     }
 }
@@ -2189,6 +2311,7 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
     let mut next_retry_instant: Option<std::time::Instant> = None;
     let mut transport_cooldown_until: Option<std::time::Instant> = None;
     let mut last_error_reason: String = String::new();
+    let mut fast_recheck_pending = false; // 登录成功后下一轮等待缩短为 3 秒, 尽快 204 复验 Connected
 
     loop {
         // 读取配置检测间隔 (默认 15s) 与开关状态
@@ -2231,9 +2354,10 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
             .as_secs();
 
         if check_enabled {
-            // 1. 探测 WiFi 与互联网状态
+            // 1. 探测 WiFi 与互联网状态 (探针并发; 离线时顺路带回 302 Location 供认证直接取参)
             let wifi = get_connected_wifi_async().await;
-            let has_internet = check_internet_with_retry().await;
+            let probe = check_internet_with_retry_detailed().await;
+            let has_internet = matches!(probe, ProbeOutcome::Online);
 
             let (has_configured_ssid, connected_matches) = {
                 let state = app.state::<AppState>();
@@ -2312,10 +2436,16 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                         backoff_remaining_secs: 0,
                     });
 
+                    // 探测即取参: 离线探测命中的 302 Location 直接带给认证流程, 省去独立嗅探往返
+                    let portal_location = match &probe {
+                        ProbeOutcome::NeedLogin(loc) => Some(loc.clone()),
+                        _ => None,
+                    };
+
                     let login_res = {
                         let state = app.state::<AppState>();
                         let _guard = state.is_logging_in.lock().await;
-                        execute_login_flow(&app).await
+                        execute_login_flow(&app, portal_location).await
                     };
 
                     match login_res {
@@ -2324,6 +2454,7 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                             next_retry_instant = None;
                             transport_cooldown_until = None;
                             last_error_reason.clear();
+                            fast_recheck_pending = true;
                             emit_service_status(&app, &ServiceStatus {
                                 state: ServiceState::Connected,
                                 wifi_connected: wifi.clone(),
@@ -2382,6 +2513,10 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
         // 等待下一个周期或被外部信号打断 (例如托盘点击立即检测/立即登录)
         let sleep_duration = if in_backoff {
             std::time::Duration::from_secs(1.max(backoff_remaining_secs.min(5)))
+        } else if fast_recheck_pending {
+            // 登录成功后的下一次探测不等完整检测周期, 缩短为 3 秒尽快复验 Connected (仅一次)
+            fast_recheck_pending = false;
+            std::time::Duration::from_secs(3)
         } else {
             std::time::Duration::from_secs(interval_secs)
         };
@@ -2407,7 +2542,9 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                         }
                         let state = app.state::<AppState>();
                         let _guard = state.is_logging_in.lock().await;
-                        let _ = execute_login_flow(&app).await;
+                        let login_res = execute_login_flow(&app, None).await;
+                        // 立即广播登录结果状态, 避免 UI 等到下一个检测周期才刷新
+                        emit_login_result_status(&app, &login_res).await;
                     }
                     Some(TriggerAction::ResetBackoff) => {
                         consecutive_business_errors = 0;

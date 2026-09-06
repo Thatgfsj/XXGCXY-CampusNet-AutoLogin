@@ -884,7 +884,7 @@
             <div class="app-brand">
                 <div class="app-logo-badge">📶</div>
                 <div class="app-title-group">
-                    <h1>校园网助手 <span class="app-ver-pill">v2.2.4</span></h1>
+                    <h1>校园网助手 <span class="app-ver-pill" id="appVersionPill">v2.2.5</span></h1>
                 </div>
             </div>
             <button class="header-btn" onclick="showSetup()">
@@ -1143,6 +1143,7 @@
     <script type="module">
         import { invoke } from '@tauri-apps/api/core';
         import { listen } from '@tauri-apps/api/event';
+        import { getVersion } from '@tauri-apps/api/app';
         
         let config = {
             primary_ssid: '',
@@ -1159,8 +1160,23 @@
         let isLoggingIn = false;  // 防止重复登录
         let lastLoginTime = 0;    // 上次登录时间
         
+        // 应用版本号: 以 tauri.conf.json 的 version 为唯一事实源, 运行时通过 getVersion() 动态获取。
+        // HTML 中的静态 "v2.2.5" 仅作为纯浏览器环境(API 调用失败)下的兜底显示。
+        async function initAppVersion() {
+            try {
+                const version = await getVersion();
+                if (version) {
+                    const el = document.getElementById('appVersionPill');
+                    if (el) el.textContent = 'v' + version;
+                }
+            } catch (e) {
+                console.log('获取应用版本失败, 保留静态兜底版本号:', e);
+            }
+        }
+
         // 初始化
         window.onload = async () => {
+            initAppVersion();
             addLog('程序已启动');
             await loadConfig();
             await loadCampusNetInfo();
@@ -1275,7 +1291,7 @@
                     text.textContent = '正在认证中...';
                     text.className = 'status-text';
                 }
-                if (detail) detail.textContent = 'Rust 原生直发认证中，校验 204 放行...';
+                if (detail) detail.textContent = '正在认证，校验 204 放行...';
             } else if (stateType === 'Backoff') {
                 if (gauge) gauge.classList.add('state-needs-login');
                 if (icon) icon.textContent = '⚠️';
@@ -1731,7 +1747,7 @@
         // 运行登录 (优先由 Rust 后端原生直发并复验)
         async function runLoginScript() {
             try {
-                addLog('[*] 正在触发认证流程 (Rust 原生直发优先)...');
+                addLog('[*] 正在触发认证流程...');
                 await invoke('trigger_manual_login');
             } catch (e) {
                 addLog('[!] 触发登录失败: ' + e);
