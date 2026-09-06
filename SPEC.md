@@ -217,3 +217,4 @@ wifi/
 31. ✅ **(v2.2.1+)** Hero Gauge 动画中心化与几何修复，全链路 UTF-8 BOM 过滤与自动化保活联网双重保障：修复 SVG 仪表盘 `stroke-dasharray` 缝隙及旋转偏心晃动、Rust 配置读取与启动状态机挂载 `strip_bom`、空 SSID 容错与无外网主动触发 Web Portal 认证、手动探测冷却计时即时归零
 32. ✅ **(v2.2.2+)** 实机全链路真实网络环境闭环验证与三层发送器（PowerShell/C#/Python）实测通关：真实 WLAN/IP/MAC 抓取与 DPAPI 动态解密实测、三层发送器真实网关请求与 code=0 响应互通验证、C# 编译器本地无缝重编译与 BSSID 防御性守卫
 33. ✅ **(v2.2.3+)** Hero Gauge 绝对同心圆中心锚定与高 DPI 弹性布局防御：SVG <g> 显式 transform-origin 70px 70px 独立旋转、中心图标绝对定位消解 6px 视觉重心偏差、flex-shrink:0 与 min-width:0 防形变溢出、filter 光晕平滑过渡
+34. ✅ **(v2.2.4+)** 保活状态机与事件驱动闭环加固、热点防并发饿死与全链路真实端到端测试：前端精准适配 Rust Serde 标签枚举格式根除状态卡死、热点守护降频至 30s 并施加前后端排他锁与异步超时防线程池饥饿、302 嗅探白名单防重定向污染本地配置、全局登录互斥锁 is_logging_in 阻断并发双发、run_ps1_tests.ps1 注入 UTF-8 编码确保中文控制台全量普适通过、test_sh_judge.sh 彻底重构为真实端到端测试并修复 xywdl.sh 在 set -e 下的退出缺陷

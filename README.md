@@ -132,6 +132,12 @@ npx @tauri-apps/cli build
 
 ## 更新日志
 
+- **v2.2.4**：**保活状态机与事件驱动闭环加固、热点防并发饿死与全链路真实端到端测试**：
+  1. **前端状态渲染与事件驱动修复**：重构前端状态机解析逻辑，精准解构 Rust Serde 标签枚举格式（`{"type":"Connected"}` 与 `{"type":"Backoff","remaining_secs":...}`），彻底修复界面由于反序列化不匹配卡死在“WiFi 网络未就绪”的严重缺陷；
+  2. **热点守护降频与 tokio 线程池防饥饿**：将前端 1s 倒计时与热点守护解耦，热点检查改为独立 30 秒周期并增设前端 `isCheckingHotspot` 防重入锁；Rust 后端通过 `spawn_blocking` 封装 netsh 调用并加入 `HOTSPOT_LOCK.try_lock()` 排他锁与 12 秒超时，彻底杜绝 PowerShell 进程堆积饿死保活状态机；
+  3. **302 嗅探安全白名单与防污染机制**：实现 `is_valid_portal_base_url` 白名单校验（严格匹配校园网专用内网网段与域名端口），阻断重定向广告页污染用户配置；新增 `save_login_profile_json`，嗅探参数安全落盘且严禁污染或覆盖用户密码；
+  4. **并发互斥调度与防抖收口**：在 `AppState` 引入全局异步互斥锁 `is_logging_in`，将后台保活、手动登录、“保存并立即登录”与托盘菜单全量串行化互斥，杜绝并发双发认证；对手动登录增加 3 秒冷却防抖；
+  5. **子进程防挂起与测试套件工业级重构**：外部脚本启动迁移为异步 `tokio::process::Command`，配置 `kill_on_drop(true)` 与 15 秒超时守护；清理虚假测试脚本；`tests/run_ps1_tests.ps1` 注入 UTF-8 输出编码配置，确保在默认中文 Windows (GBK 控制台) 下 33/33 测试普适通过；`tests/test_sh_judge.sh` 重构为真实驱动 `xywdl.sh` 与 `mock_portal.py` 的端到端测试（19项测试全绿），并修复 `xywdl.sh` 在 `set -e` 模式下正则兜底提前异常退出的隐患。
 - **v2.2.3**：**Hero Gauge 绝对几何中心重构与全视口高 DPI 自适应加固**：
   1. **SVG `<g>` 分组与绝对同心圆中心锚定**：动态圆环由 `<g class="radar-meter-group">` 独立包裹，显式声明 `transform-origin: 70px 70px; transform-box: view-box;`，使背景轨道圆环静止，动态扫描环在底层严格以 `(70, 70)` 为绝对原点进行 100% 纯正同心旋转；
   2. **中心内容绝对坐标层解耦（消除 6px 视觉重心偏移）**：重构 `.radar-center-content` 为绝对定位遮罩，`.status-icon` 通过 `top: 50%; left: 50%; transform: translate(-50%, -50%)` 绝对锚定在 `(70px, 70px)` 几何中心，脉冲呼吸点脱离 Flex 竖向排列并以 CSS 变量 `--dot-color` 驱动，彻底消除了下方小点对图标向上的挤压偏移；

@@ -9,7 +9,7 @@
 | **仓库地址** | https://github.com/Thatgfsj/XXGCXY-CampusNet-AutoLogin |
 | **作者** | Thatgfsj |
 | **许可证** | MIT |
-| **当前版本** | 2.2.3 |
+| **当前版本** | 2.2.4 |
 | **目标用户** | 新乡工程学院校园网用户 |
 | **主要平台** | Windows 10/11（主）、Linux（辅） |
 
@@ -1323,6 +1323,30 @@ xywdl.ps1: Unicode text, UTF-8 (with BOM) text, with CRLF line terminators
 - 为 `.toggle-switch` 添加 `flex-shrink: 0`，防止在 125%/150% 放大或窄视口下开关被文字挤压形变。
 - 为 `.network-pill` 添加 `min-width: 0`，消除超长 SSID 撑爆 CSS Grid 网格单元格的潜在隐患。
 - 为 `.radar-meter-circle` 补充 `filter 0.4s ease` 过渡，消除光晕硬切。
+
+### 12.17 v2.2.4 保活状态机与事件驱动闭环加固、热点防并发饿死与全链路真实端到端测试
+
+#### 1. 前端状态机反序列化适配与事件驱动渲染
+- 彻底解决前端通过 `state === 'Connected'` 字符串匹配 Rust Serde 标签枚举格式（`{"type":"Connected"}`）失败导致界面卡死在“WiFi 网络未就绪”的缺陷。
+- 重构 `handleBackendStatusChanged`，优先解构 `stateObj.type || stateObj`，正确提取 `Backoff` 对象的 `remaining_secs`，恢复精准的事件驱动动态渲染。
+
+#### 2. 热点守护解耦降频与 tokio 线程池防饥饿
+- 前端将 1s 倒计时定时器与移动热点守护完全解耦，热点检查改为独立 30s 周期，并增设 `isCheckingHotspot` 前端在途重入锁。
+- Rust 后端将阻塞式 `netsh` 调用迁移至 `tokio::task::spawn_blocking`，增设静态全局互斥锁 `HOTSPOT_LOCK.try_lock()` 与 12 秒超时，防止热点检查堆积拉起大量 PowerShell 进程从而耗尽 tokio 线程池饿死保活。
+
+#### 3. 302 嗅探白名单校验与防配置污染
+- 新增 `is_valid_portal_base_url` 白名单校验（严格限制为校园网专用内网网段 `10.x.x.x`、`172.x.x.x`、`192.168.x.x` 及校内指定域名与端口），阻断外部重定向（如运营商欠费/广告页面）篡改用户的 Portal 配置。
+- 新增 `save_login_profile_json`，后台参数嗅探仅更新网络参数字段并落盘，严禁覆盖或清空用户密码。
+
+#### 4. 全局并发互斥锁与登录防抖
+- `AppState` 引入全局异步互斥锁 `is_logging_in: Arc<tokio::sync::Mutex<()>>`，将后台保活任务、托盘菜单“立即登录”与前端手动触发统一纳入互斥锁调度，杜绝并发双发认证请求。
+- 对前端手动登录触发增设 3 秒冷却防抖保护。
+
+#### 5. 子进程生命周期守护与测试套件工业级重构
+- 外部脚本拉起迁移至异步 `tokio::process::Command`，配置 `kill_on_drop(true)` 与 15 秒超时守护，杜绝僵尸进程残留。
+- 清理无断言的虚假测试脚本。
+- `tests/run_ps1_tests.ps1` 顶部注入 UTF-8 输出编码配置，根治中文 Windows 默认 GBK 控制台下的解码异常，使 33/33 测试在任意语言环境下普适通过。
+- `tests/test_sh_judge.sh` 彻底重构为通过 `mock_portal.py` 真实驱动 `xywdl.sh` 完整认证生命周期的端到端测试（19/19 项全绿），并修复 `xywdl.sh` 在 `set -e` 模式下正则兜底异常退出的真实缺陷。
 
 
 

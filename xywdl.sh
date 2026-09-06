@@ -60,27 +60,32 @@ if [[ ! -f "$CRED_FILE" ]]; then
     exit 2
 fi
 
-# 用 python3 解析 JSON (Linux 一般都装了, 比 jq 通用)
-if ! command -v python3 &>/dev/null; then
-    log_error "[!] 需要 python3 解析配置, 但找不到"
+# 用 python3/python 解析 JSON (优先 python3, 降级 python)
+PY_BIN=""
+if python3 -c 'import sys' >/dev/null 2>&1; then
+    PY_BIN="python3"
+elif python -c 'import sys' >/dev/null 2>&1; then
+    PY_BIN="python"
+else
+    log_error "[!] 需要 python3 或 python 解析配置, 但未找到可用解释器"
     exit 1
 fi
 
 PROFILE_JSON=$(cat "$PROFILE_FILE")
-USER_ID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('user_id',''))")
-OPERATOR=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('operator',''))")
-BASE_URL=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url',''))")
-WLAN_AC_NAME=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_ac_name',''))")
-WLAN_AC_IP=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_ac_ip',''))")
-VLAN=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('vlan',''))")
-PROFILE_MAC=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('mac_address',''))")
-WLAN_USER_IP=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_user_ip',''))")
-SSID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('ssid',''))")
-PORTAL_PAGE_ID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('portal_page_id','3'))")
-PORTAL_TYPE=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('portal_type','0'))")
-VERSION=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('version','0'))")
-BIND_CTRL_ID=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('bind_ctrl_id',''))")
-HOSTNAME_VAL=$(echo "$PROFILE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('hostname',''))")
+USER_ID=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('user_id',''))")
+OPERATOR=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('operator',''))")
+BASE_URL=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url',''))")
+WLAN_AC_NAME=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_ac_name',''))")
+WLAN_AC_IP=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_ac_ip',''))")
+VLAN=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('vlan',''))")
+PROFILE_MAC=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('mac_address',''))")
+WLAN_USER_IP=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('wlan_user_ip',''))")
+SSID=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('ssid',''))")
+PORTAL_PAGE_ID=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('portal_page_id','3'))")
+PORTAL_TYPE=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('portal_type','0'))")
+VERSION=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('version','0'))")
+BIND_CTRL_ID=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('bind_ctrl_id',''))")
+HOSTNAME_VAL=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('hostname',''))")
 
 # 校验必需字段
 # mac_address / wlan_user_ip 是可选的: UI 允许留空, 运行时由本机自动取兜底
@@ -160,14 +165,14 @@ fi
 [[ -z "$HOSTNAME_VAL" ]] && HOSTNAME_VAL=$(hostname)
 
 TIMESTAMP=$(date +%s)000
-UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c "import uuid; print(uuid.uuid4())")
+UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || "$PY_BIN" -c "import uuid; print(uuid.uuid4())")
 
-# 用 python3 做 URL 编码 (含 passwd 等可能含特殊字符的字段)
+# 用 python3/python 做 URL 编码 (含 passwd 等可能含特殊字符的字段)
 QUERY=$(USER_ID="$USER_ID" PASSWORD="$PASSWORD" WLAN_USER_IP="$WLAN_USER_IP" \
 WLAN_AC_NAME="$WLAN_AC_NAME" WLAN_AC_IP="$WLAN_AC_IP" SSID="$SSID" VLAN="$VLAN" \
 MAC="$MAC" VERSION="$VERSION" PORTAL_PAGE_ID="$PORTAL_PAGE_ID" TIMESTAMP="$TIMESTAMP" \
 UUID="$UUID" PORTAL_TYPE="$PORTAL_TYPE" HOSTNAME_VAL="$HOSTNAME_VAL" BIND_CTRL_ID="$BIND_CTRL_ID" \
-python3 -c "
+"$PY_BIN" -c "
 import urllib.parse, os
 params = {
     'userid': os.environ['USER_ID'],
@@ -218,19 +223,19 @@ fi
 
 # 第 2 层: python3 sender.py (纯标准库, 跨平台最强保底)
 if [[ -z "$RESPONSE" ]]; then
-    log_info "    [L2] python3..."
+    log_info "    [L2] $PY_BIN..."
     PY_SENDER="$SCRIPT_DIR/src/sender/sender.py"
     if [[ ! -f "$PY_SENDER" ]]; then
         PY_SENDER="$SCRIPT_DIR/sender.py"
     fi
-    if command -v python3 >/dev/null 2>&1 && [[ -f "$PY_SENDER" ]]; then
-        if RESPONSE=$(printf '%s' "$REQUEST_URL" | python3 "$PY_SENDER" 2>/tmp/xywdl_py_err.txt); then
+    if command -v "$PY_BIN" >/dev/null 2>&1 && [[ -f "$PY_SENDER" ]]; then
+        if RESPONSE=$(printf '%s' "$REQUEST_URL" | "$PY_BIN" "$PY_SENDER" 2>/tmp/xywdl_py_err.txt); then
             log_info "    [L2] 成功"
             rm -f /tmp/xywdl_py_err.txt
         else
             PY_ERR=$(cat /tmp/xywdl_py_err.txt 2>/dev/null)
             rm -f /tmp/xywdl_py_err.txt
-            log_error "[!] python3 失败: $PY_ERR"
+            log_error "[!] $PY_BIN 失败: $PY_ERR"
             exit 99
         fi
     else
@@ -240,15 +245,15 @@ if [[ -z "$RESPONSE" ]]; then
 fi
 
 log_info "[*] 步骤 4: 判定..."
-# 优先使用 python3 解析 JSON, 提取 code/message 摘要
-RESP_CODE=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('code',''))" 2>/dev/null || echo "")
-RESP_MSG=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('message',''))" 2>/dev/null || echo "")
+# 优先使用 python 解析 JSON, 提取 code/message 摘要
+RESP_CODE=$(echo "$RESPONSE" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('code',''))" 2>/dev/null || echo "")
+RESP_MSG=$(echo "$RESPONSE" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('message',''))" 2>/dev/null || echo "")
 
 if [[ -z "$RESP_CODE" ]]; then
-    RESP_CODE=$(echo "$RESPONSE" | grep -oE '"code"[[:space:]]*:[[:space:]]*"?[0-9]+' | head -1 | grep -oE '[0-9]+')
+    RESP_CODE=$( (echo "$RESPONSE" | grep -oE '"code"[[:space:]]*:[[:space:]]*"?[0-9]+' | head -1 | grep -oE '[0-9]+') || echo "" )
 fi
 if [[ -z "$RESP_MSG" ]]; then
-    RESP_MSG=$(echo "$RESPONSE" | grep -oE '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    RESP_MSG=$( (echo "$RESPONSE" | grep -oE '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/') || echo "" )
 fi
 
 # 判定结果 (跟 PS 端一致)

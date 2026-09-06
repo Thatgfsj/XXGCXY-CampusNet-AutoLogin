@@ -16,6 +16,10 @@ param(
     [string]$ProjectDir = (Split-Path $PSScriptRoot -Parent)
 )
 
+# 确保在默认 GBK (代码页 936) 的中文 Windows 环境下，正确捕获并解码 xywdl.ps1 的 UTF-8 控制台输出
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $ErrorActionPreference = "Stop"
 $PASS = 0; $FAIL = 0; $FAILURES = @()
 

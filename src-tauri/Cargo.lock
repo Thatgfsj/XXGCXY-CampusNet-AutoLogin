@@ -76,25 +76,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
-name = "app"
-version = "2.0.4"
-dependencies = [
- "dirs 5.0.1",
- "log",
- "ping",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-log",
- "tauri-plugin-shell",
- "tokio",
- "windows 0.58.0",
- "winreg 0.52.0",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5850,6 +5831,25 @@ dependencies = [
  "libc",
  "once_cell",
  "pkg-config",
+]
+
+[[package]]
+name = "xxgcxy-wifi"
+version = "2.2.4"
+dependencies = [
+ "dirs 5.0.1",
+ "log",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-log",
+ "tauri-plugin-shell",
+ "tokio",
+ "url 2.5.4",
+ "windows 0.58.0",
+ "winreg 0.52.0",
 ]
 
 [[package]]
