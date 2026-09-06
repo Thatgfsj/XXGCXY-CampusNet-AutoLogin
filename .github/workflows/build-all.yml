@@ -37,6 +37,9 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Verify Cargo.lock
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
+
       - name: Remove _pw7_ directory if present (历史残留)
         shell: pwsh
         run: |
@@ -259,41 +262,17 @@ jobs:
           echo "=== Artifacts ==="
           find artifacts -type f
 
+      - name: Generate Release Notes
+        run: |
+          python3 .github/scripts/generate_release_notes.py "${{ steps.vars.outputs.version }}" "${{ steps.vars.outputs.tag_name }}" artifacts/RELEASE_NOTES.md
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.vars.outputs.tag_name }}
           name: ${{ steps.vars.outputs.tag_name }} - 校园网自动登录助手
           make_latest: true
-          body: |
-            ${{ steps.vars.outputs.tag_name }} - 校园网自动登录助手
-
-            ## 系统要求
-
-            - **Windows 10/11**: 自带 PowerShell 5.1+ / .NET Framework 4.x
-            - **Windows 7/8**: 需装 WMF 5.1（[下载](https://www.microsoft.com/en-us/download/details.aspx?id=54616)）
-            - **Linux**: 需 curl 或 python3（[安装](https://www.python.org/downloads/)）
-
-            ## 下载
-
-            **Windows (系统 PowerShell 5.1+, 体积小)**
-            - `xxgcxy-wifi_${{ steps.vars.outputs.version }}_x64-setup.exe` - NSIS 安装包 (~5 MB)
-            - `xxgcxy-wifi_${{ steps.vars.outputs.version }}_x64_zh-CN.msi` - MSI 安装包 (~6 MB)
-
-            **Linux**
-            - `xxgcxy-wifi_${{ steps.vars.outputs.version }}_amd64.deb` - Debian/Ubuntu 软件包
-            - `xxgcxy-wifi-v${{ steps.vars.outputs.version }}-x86_64-linux.tar.gz` - 通用 Linux 压缩包
-            - `xxgcxy-wifi-${{ steps.vars.outputs.version }}-1.x86_64.rpm` - RPM 软件包
-
-            **Cross-platform**
-            - `xywdl.sh` - 独立 Shell 脚本 (Linux/macOS, 需要 curl 或 python3)
-
-            ## 升级说明
-
-            从旧版本升级：
-            1. 直接下载安装最新的安装包覆盖安装即可
-            2. 现有账号与 WiFi 配置自动保留
-            3. 若之前遇到连接过慢、卡在待认证或被意外掐线，升级后即可极速恢复秒登
+          body_path: artifacts/RELEASE_NOTES.md
           files: |
             artifacts/windows/*.exe
             artifacts/windows/*.msi

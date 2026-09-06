@@ -29,6 +29,7 @@ RESPONSE_TEMPLATES = {
     "illegal_text": '{"result":0,"info":"非法接入"}',
     "ac_device_error": '{"code":"1","rec":null,"message":"设备不在正常状态,无法认证上网,请稍后","wlanacIp":null}',
     "ac_string_zero": '{"code":"0","rec":null,"message":"success","wlanacIp":null}',
+    "fake_successfully": '<!DOCTYPE html><html><head><title>Portal Login</title></head><body>Redirected successfully to captive portal</body></html>',
 }
 
 
@@ -87,8 +88,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # 3. 假 200 页面 (Captive Portal 拦截但返回 200 HTML)
-        if code_key == "fake_200_html":
-            html = b"<!DOCTYPE html><html><head><title>Portal Login</title></head><body>Please login to campus net</body></html>"
+        if code_key in ("fake_200_html", "fake_successfully"):
+            text = "Please login to campus net" if code_key == "fake_200_html" else "Redirected successfully to captive portal"
+            html = f"<!DOCTYPE html><html><head><title>Portal Login</title></head><body>{text}</body></html>".encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(html)))

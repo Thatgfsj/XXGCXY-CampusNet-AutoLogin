@@ -210,6 +210,15 @@ RET=0
 HOME="$DIR_C2" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
 assert_ne "${RET:-0}" 0 "C2 假 200 页面绝不误判为成功 (exit code != 0)"
 
+# C3 含 "successfully" 假 200 页面 -> 不应判为成功 (exit code != 0)
+echo "fake_successfully" > "$CODEFILE"
+DIR_C3="$TEST_ROOT/case_fake_successfully"
+create_profile "$DIR_C3"
+create_cred "$DIR_C3"
+RET=0
+HOME="$DIR_C3" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+assert_ne "${RET:-0}" 0 "C3 含 successfully 假 200 页面绝不误判为成功 (exit code != 0)"
+
 echo ""
 echo "===== 结果: $PASS 通过, $FAIL 失败 ====="
 if [ $FAIL -gt 0 ]; then

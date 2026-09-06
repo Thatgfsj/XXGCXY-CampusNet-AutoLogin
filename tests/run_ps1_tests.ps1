@@ -17,7 +17,7 @@ param(
 )
 
 # 确保在默认 GBK (代码页 936) 的中文 Windows 环境下，正确捕获并解码 xywdl.ps1 的 UTF-8 控制台输出
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ErrorActionPreference = "Stop"
@@ -116,9 +116,9 @@ $portMap = @{
     "0"   = 18080; "1"   = 18081; "44"  = 18082; "99"  = 18083
     "10"  = 18084; "100" = 18085; "123" = 18086; "440" = 18087
     "ac_device_error" = 18088; "ac_string_zero" = 18089
-    "302_redirect" = 18090; "fake_200_html" = 18091
+    "302_redirect" = 18090; "fake_200_html" = 18091; "fake_successfully" = 18092
 }
-foreach ($code in @("0","1","44","99","10","100","123","440","ac_device_error","ac_string_zero","302_redirect","fake_200_html")) {
+foreach ($code in @("0","1","44","99","10","100","123","440","ac_device_error","ac_string_zero","302_redirect","fake_200_html","fake_successfully")) {
     Ensure-Mock $code $portMap[$code] | Out-Null
 }
 
@@ -297,6 +297,14 @@ $AppData = New-CaseAppData "case_g2"
 Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
 $rg2 = Invoke-Xywdl -AppData $AppData
 Assert-True ($rg2.ExitCode -ne 0) "G2 假 200 页面绝不误判为认证成功" "exit=$($rg2.ExitCode)"
+
+# G3: 含 "successfully" 假 200 页面 -> 绝不误判为成功 (exit code 不应为 0)
+$AppData = New-CaseAppData "case_g3"
+(New-TestProfile -BaseUrl "http://127.0.0.1:18092/portal.do" | ConvertTo-Json) |
+    Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
+Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
+$rg3 = Invoke-Xywdl -AppData $AppData
+Assert-True ($rg3.ExitCode -ne 0) "G3 含 successfully 假 200 页面绝不误判为认证成功" "exit=$($rg3.ExitCode)"
 
 # ---------- 清理 ----------
 foreach ($m in $mocks.Values) { Stop-Process -Id $m.Proc.Id -Force -ErrorAction SilentlyContinue }

@@ -256,8 +256,8 @@ if [[ -z "$RESP_MSG" ]]; then
     RESP_MSG=$( (echo "$RESPONSE" | grep -oE '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/') || echo "" )
 fi
 
-# 判定结果 (跟 PS 端一致)
-if [[ "$RESP_CODE" == "0" ]] || echo "$RESPONSE" | grep -q "success" || echo "$RESPONSE" | grep -q "认证成功"; then
+# 判定结果 (严格收口: 仅认 JSON code == "0", 或在无 code 且非 HTML 时整词匹配 success / 认证成功)
+if [[ "$RESP_CODE" == "0" ]] || ( [[ -z "$RESP_CODE" ]] && [[ "$RESPONSE" != *"<html"* && "$RESPONSE" != *"<!DOCTYPE"* ]] && ( echo "$RESPONSE" | grep -qE '(\bsuccess\b|认证成功)' ) ); then
     log_info "    code=$RESP_CODE  msg=$RESP_MSG"
     log_success "[+] 认证成功"
     exit 0
