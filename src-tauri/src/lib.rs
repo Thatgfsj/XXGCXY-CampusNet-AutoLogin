@@ -1035,7 +1035,7 @@ async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
             .args(["wlan", "show", "networks", "mode=bssid"])
             .output()
             .map_err(|e| format!("执行扫描命令失败: {}", e))?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = decode_console_output(&output.stdout);
 
         // 诊断: netsh 命令本身失败(典型: "系统上没有无线接口")在 stdout 不显示但在 stderr 显示
         // 把 stderr 信息带上,方便定位"没扫到 WiFi"的根因
@@ -1289,7 +1289,7 @@ fn get_connected_wifi() -> Option<String> {
             .args(["wlan", "show", "interfaces"])
             .output()
             .ok()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = decode_console_output(&output.stdout);
         for line in stdout.lines() {
             let line = line.trim();
             if line.starts_with("SSID") && !line.starts_with("BSSID") && line.contains(':') {
@@ -1384,7 +1384,7 @@ async fn check_url(url: &str) -> CheckResult {
         let client = match reqwest::blocking::Client::builder()
             .no_proxy()
             .local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
-            .timeout(std::time::Duration::from_secs(2))
+            .timeout(std::time::Duration::from_secs(3))
             .redirect(reqwest::redirect::Policy::none())
             .build()
         {
@@ -1746,6 +1746,24 @@ fn generate_uuid() -> String {
     )
 }
 
+/// 解码控制台程序输出: 中文 Windows 的 netsh 输出为 GBK 编码,
+/// String::from_utf8_lossy 会把 "物理地址"/"IPv4 地址" 等标签变成乱码导致 MAC/IP 永远解析失败
+#[allow(dead_code)]
+fn decode_console_output(bytes: &[u8]) -> String {
+    // 若字节本就是合法 UTF-8 (如系统开启 "Beta: 使用 Unicode UTF-8 提供全球语言支持") 则直接使用
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    #[cfg(windows)]
+    let decoded = {
+        let (decoded, _, _) = encoding_rs::GBK.decode(bytes);
+        decoded.into_owned()
+    };
+    #[cfg(not(windows))]
+    let decoded = String::from_utf8_lossy(bytes).into_owned();
+    decoded
+}
+
 fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
     #[cfg(windows)]
     {
@@ -1754,7 +1772,7 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
         let mut iface_name = "WLAN".to_string();
 
         if let Ok(output) = hidden_command("netsh").args(["wlan", "show", "interfaces"]).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stdout = decode_console_output(&output.stdout);
             for line in stdout.lines() {
                 let line = line.trim();
                 if (line.starts_with("Name") || line.starts_with("名称")) && line.contains(':') {
@@ -1778,7 +1796,7 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
 
         let mut ip = None;
         if let Ok(output) = hidden_command("netsh").args(["interface", "ipv4", "show", "addresses", &iface_name]).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stdout = decode_console_output(&output.stdout);
             for line in stdout.lines() {
                 let line = line.trim();
                 if (line.starts_with("IP Address") || line.starts_with("IP 地址") || line.starts_with("IPv4 地址")) && line.contains(':') {
@@ -1796,7 +1814,7 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
         // 兜底：若按网卡名未查询到 IP，遍历所有 IPv4 地址寻找非回环、非保留的首个活动 IP
         if ip.is_none() {
             if let Ok(output) = hidden_command("netsh").args(["interface", "ipv4", "show", "addresses"]).output() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stdout = decode_console_output(&output.stdout);
                 for line in stdout.lines() {
                     let line = line.trim();
                     if (line.starts_with("IP Address") || line.starts_with("IP 地址") || line.starts_with("IPv4 地址")) && line.contains(':') {
@@ -2169,6 +2187,7 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
 
     let mut consecutive_business_errors: u32 = 0;
     let mut next_retry_instant: Option<std::time::Instant> = None;
+    let mut transport_cooldown_until: Option<std::time::Instant> = None;
     let mut last_error_reason: String = String::new();
 
     loop {
@@ -2189,6 +2208,13 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                 next_retry_instant = None;
                 false
             }
+        } else {
+            false
+        };
+
+        // 传输层失败 (超时/连接重置等) 60 秒冷却: 未到期则跳过本轮自动登录, 防止高频轰炸认证服务器触发限流
+        let transport_cooldown_active = if let Some(until) = transport_cooldown_until {
+            now < until
         } else {
             false
         };
@@ -2266,6 +2292,16 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                         consecutive_business_errors,
                         backoff_remaining_secs,
                     });
+                } else if transport_cooldown_active {
+                    // 传输层冷却未到期: 保持 NeedsLogin 状态但不发起登录请求
+                    emit_service_status(&app, &ServiceStatus {
+                        state: ServiceState::NeedsLogin,
+                        wifi_connected: wifi.clone(),
+                        internet_ok: false,
+                        last_check_time: timestamp_now,
+                        consecutive_business_errors,
+                        backoff_remaining_secs: 0,
+                    });
                 } else {
                     emit_service_status(&app, &ServiceStatus {
                         state: ServiceState::LoggingIn,
@@ -2286,6 +2322,7 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                         Ok(_) => {
                             consecutive_business_errors = 0;
                             next_retry_instant = None;
+                            transport_cooldown_until = None;
                             last_error_reason.clear();
                             emit_service_status(&app, &ServiceStatus {
                                 state: ServiceState::Connected,
@@ -2325,6 +2362,8 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                                     backoff_remaining_secs: backoff_secs,
                                 });
                             } else {
+                                // 非业务拒绝的登录失败 (超时/连接重置等传输层错误): 60 秒后再自动重试
+                                transport_cooldown_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(60));
                                 emit_service_status(&app, &ServiceStatus {
                                     state: ServiceState::NeedsLogin,
                                     wifi_connected: wifi.clone(),
@@ -2358,6 +2397,7 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                         emit_backend_log(&app, "[*] 收到手动立即登录信号，重置退避计时器");
                         consecutive_business_errors = 0;
                         next_retry_instant = None;
+                        transport_cooldown_until = None;
                         last_error_reason.clear();
                         // 消费积压的重复登录信号，防止排队并发
                         while let Ok(action) = rx.try_recv() {
@@ -2491,13 +2531,24 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(app_state)
         .setup(move |app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // 后端日志落盘: 与 xywdl-*.log 脚本日志同目录 (%APPDATA%\xxgcxy-wifi\logs), 文件名前缀 backend
+            // 注意: 生产构建同样注册 (此前 release 完全无后端日志, 故障时无法回溯)
+            let log_dir = get_login_dir().join("logs");
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .targets([
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                            path: log_dir,
+                            file_name: Some(String::from("backend")),
+                        }),
+                    ])
+                    .max_file_size(1024 * 1024)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                    .build(),
+            )?;
 
             setup_tray(app.handle())?;
 
@@ -2817,6 +2868,22 @@ mod tests {
         assert!(!is_valid_portal_base_url("http://ad.carrier.com/ads.html"));
         assert!(!is_valid_portal_base_url(""));
         assert!(!is_valid_portal_base_url("ftp://172.18.252.12/portal.do"));
+    }
+
+    #[test]
+    fn test_decode_console_output_gbk() {
+        // 中文 Windows 下 netsh 的 stdout 为 GBK 编码, 必须正确解码 "物理地址" 等中文标签
+        let (gbk_bytes, _, _) = encoding_rs::GBK.encode("物理地址       : AA-BB-CC-DD-EE-FF");
+        let decoded = decode_console_output(&gbk_bytes);
+        assert!(decoded.contains("物理地址"), "GBK 解码后应包含 '物理地址': {}", decoded);
+        assert!(decoded.contains("AA-BB-CC-DD-EE-FF"), "GBK 解码后应包含 MAC: {}", decoded);
+    }
+
+    #[test]
+    fn test_decode_console_output_utf8_passthrough() {
+        // 合法 UTF-8 字节 (如系统开启 UTF-8 beta 选项) 应原样直通不被二次转码
+        let raw = "IPv4 地址          : 10.12.34.56";
+        assert_eq!(decode_console_output(raw.as_bytes()), raw);
     }
 }
 

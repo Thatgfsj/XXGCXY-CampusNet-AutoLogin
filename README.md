@@ -132,6 +132,12 @@ npx @tauri-apps/cli build
 
 ## 更新日志
 
+- **v2.2.5**：**中文系统网卡识别修复（GBK 解码）、传输层防限流冷却与后端日志落盘**：
+  1. **netsh 输出 GBK 解码修复（原生直发瘫痪根因）**：中文 Windows 下 netsh 输出为 GBK 编码，原 `String::from_utf8_lossy` 将"物理地址"/"IPv4 地址"等标签解码为乱码，导致 MAC/IP 永远解析失败、Rust 原生直发每次被拒而降级 PowerShell 脚本。新增 `decode_console_output`（合法 UTF-8 直通、否则按 GBK 解码），覆盖 `get_wlan_network_info`/`get_connected_wifi`/`scan_wifi` 全部解析点，附带 GBK 编解码单元测试；
+  2. **传输层失败 60 秒冷却（防认证网关限流）**：实机日志显示网关短暂限流时原逻辑 4 分钟连发 5 轮登录、每轮三层各一枪，加剧对方超时/RST。现非业务拒绝的登录失败（超时/连接重置）进入 60 秒冷却，期间保持 NeedsLogin 状态但不发包；登录成功或手动"立即登录"即时清除冷却；
+  3. **三层发送链同因短路**：`xywdl.ps1` 中 L1 命中网络级故障（超时/无法连接/连接被重置）时跳过 L2 C# 与 L3 Python 的无效重试（同一 URL 三发毫无意义），直接走既有"三层全部失败"出口；服务器有 HTTP 响应（302/4xx/5xx）不短路，保留降级价值。新增 H 组 4 项用例，套件 38/38 全绿；
+  4. **后端日志生产环境落盘**：移除 tauri-plugin-log 的 debug-only 门控（此前 release 构建完全无后端日志、故障无法回溯），新增文件目标与 xywdl 脚本日志同目录（`%APPDATA%\xxgcxy-wifi\logs\backend*.log`），1MB 轮转保留历史；
+  5. **探针超时放宽**：联网探测超时由 2 秒放宽至 3 秒，降低高密度校园网拥塞下的"假离线"误判率（本轮风暴的触发起点）。
 - **v2.2.4**：**保活状态机与事件驱动闭环加固、热点防并发饿死与全链路真实端到端测试**：
   1. **前端状态渲染与事件驱动修复**：重构前端状态机解析逻辑，精准解构 Rust Serde 标签枚举格式（`{"type":"Connected"}` 与 `{"type":"Backoff","remaining_secs":...}`），彻底修复界面由于反序列化不匹配卡死在“WiFi 网络未就绪”的严重缺陷；
   2. **热点守护降频与 tokio 线程池防饥饿**：将前端 1s 倒计时与热点守护解耦，热点检查改为独立 30 秒周期并增设前端 `isCheckingHotspot` 防重入锁；Rust 后端通过 `spawn_blocking` 封装 netsh 调用并加入 `HOTSPOT_LOCK.try_lock()` 排他锁与 12 秒超时，彻底杜绝 PowerShell 进程堆积饿死保活状态机；

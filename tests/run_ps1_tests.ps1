@@ -8,6 +8,7 @@
 #    C. 请求参数编码 (SSID 含空格, 密码含特殊字符)
 #    D. 密码不泄漏到日志 (passwd= 应被脱敏)
 #    E. 稳定性: 连续多次调用退出码稳定
+#    H. 网络级故障同因短路 (L1 网络级失败 → 跳过 L2/L3, 仍 exit 99)
 #
 #  用法:
 #    powershell -ExecutionPolicy Bypass -File tests/run_ps1_tests.ps1
@@ -305,6 +306,18 @@ $AppData = New-CaseAppData "case_g3"
 Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
 $rg3 = Invoke-Xywdl -AppData $AppData
 Assert-True ($rg3.ExitCode -ne 0) "G3 含 successfully 假 200 页面绝不误判为认证成功" "exit=$($rg3.ExitCode)"
+
+Write-Host "===== H. 网络级故障同因短路 (L1 失败即跳过 L2/L3, 防网关限流) =====" -ForegroundColor Cyan
+# H: L1 连接拒绝 (127.0.0.1:1 无监听, 网络级故障 "无法连接到远程服务器") -> 短路 L2/L3, 走三层全失败出口 exit 99
+$AppData = New-CaseAppData "case_h1"
+(New-TestProfile -BaseUrl "http://127.0.0.1:1/portal.do" | ConvertTo-Json) |
+    Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
+Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
+$rh = Invoke-Xywdl -AppData $AppData
+Assert-True ($rh.ExitCode -eq 99) "H1 L1 网络级连接失败 → 短路后仍走三层全失败出口 exit 99" "exit=$($rh.ExitCode)"
+Assert-True ($rh.Output.Contains("跳过 L2/L3")) "H2 短路提示已输出" "output=$($rh.Output -replace '\r?\n', ' | ')"
+Assert-True (-not $rh.Output.Contains("[L2] C# sender...")) "H3 未尝试 L2 C# sender" "output=$($rh.Output -replace '\r?\n', ' | ')"
+Assert-True (-not $rh.Output.Contains("[L3] Python...")) "H4 未尝试 L3 Python" "output=$($rh.Output -replace '\r?\n', ' | ')"
 
 # ---------- 清理 ----------
 foreach ($m in $mocks.Values) { Stop-Process -Id $m.Proc.Id -Force -ErrorAction SilentlyContinue }

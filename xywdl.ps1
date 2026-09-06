@@ -601,6 +601,9 @@ function Invoke-CampusLogin {
     $body = $null
     $sendSource = ""
     $sendErrors = @()
+    # 网络级故障匹配集: 超时 / 无法连接 / 连接被重置或意外关闭 (服务器有 HTTP 响应如 302/4xx/5xx 不在内)
+    $networkTimeoutPattern = 'timed out|超时|无法连接|unable to connect|连接被意外关闭|connection was closed|强迫关闭|forcibly closed|canceled due to|已取消'
+    $networkLevelFailure = $false
 
     # 4.1 第 1 层: PowerShell Invoke-WebRequest (默认主力, 模拟主流浏览器标头防 WAF/AC 意外掐线)
     Write-Host "    [L1] PowerShell..." -ForegroundColor Gray
@@ -624,13 +627,24 @@ function Invoke-CampusLogin {
         }
         $sendErrors += "PowerShell: $errMsg$statusCode"
         Write-Host "    [L1] 失败: $errMsg$statusCode" -ForegroundColor Red
+        # 网络级超时无需逐层重试,避免触发网关限流: 命中网络级故障则标记短路, 跳过 L2/L3
+        if ($errMsg -match $networkTimeoutPattern) {
+            $networkLevelFailure = $true
+            Write-Host "    [L1] 网络级超时/连接失败, 跳过 L2/L3 (避免加重网关限流)" -ForegroundColor Yellow
+        }
     } catch {
         $sendErrors += "PowerShell: $($_.Exception.Message)"
         Write-Host "    [L1] 失败: $($_.Exception.Message)" -ForegroundColor Red
+        # 网络级超时无需逐层重试,避免触发网关限流: 命中网络级故障则标记短路, 跳过 L2/L3
+        if ($_.Exception.Message -match $networkTimeoutPattern) {
+            $networkLevelFailure = $true
+            Write-Host "    [L1] 网络级超时/连接失败, 跳过 L2/L3 (避免加重网关限流)" -ForegroundColor Yellow
+        }
     }
 
     # 4.2 第 2 层: C# sender (xywdl_sender.exe, .NET Framework 4.x, Win7+ 自带运行时)
-    if ($null -eq $body) {
+    # 网络级超时无需逐层重试,避免触发网关限流: L1 已确认网络级故障时直接短路跳过本层
+    if ($null -eq $body -and -not $networkLevelFailure) {
         Write-Host "    [L2] C# sender..." -ForegroundColor Gray
         $senderExe = $null
         foreach ($cand in @(
@@ -665,7 +679,8 @@ function Invoke-CampusLogin {
     }
 
     # 4.3 第 3 层: Python sender (sender.py, 纯标准库, 跨平台最强保底)
-    if ($null -eq $body) {
+    # 网络级超时无需逐层重试,避免触发网关限流: L1 已确认网络级故障时直接短路跳过本层
+    if ($null -eq $body -and -not $networkLevelFailure) {
         Write-Host "    [L3] Python..." -ForegroundColor Gray
         $pyScript = $null
         foreach ($cand in @(

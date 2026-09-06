@@ -5824,9 +5824,10 @@ dependencies = [
 
 [[package]]
 name = "xxgcxy-wifi"
-version = "2.2.4"
+version = "2.2.5"
 dependencies = [
  "dirs 5.0.1",
+ "encoding_rs",
  "log",
  "reqwest 0.11.27",
  "serde",
