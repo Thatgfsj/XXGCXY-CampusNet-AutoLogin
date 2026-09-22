@@ -139,14 +139,14 @@ echo "===== A. 缺失/损坏配置 (退出码) ====="
 # A1 缺失 profile.json -> exit 2
 DIR_A1="$TEST_ROOT/case_a1"
 mkdir -p "$DIR_A1"
-HOME="$DIR_A1" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+HOME="$DIR_A1" XDG_CONFIG_HOME="$DIR_A1/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
 assert_eq "${RET:-0}" 2 "A1 缺失 profile.json → exit 2"
 
 # A2 存在 profile 但缺失 credential.bin -> exit 2
 DIR_A2="$TEST_ROOT/case_a2"
 create_profile "$DIR_A2"
 RET=0
-HOME="$DIR_A2" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+HOME="$DIR_A2" XDG_CONFIG_HOME="$DIR_A2/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
 assert_eq "${RET:-0}" 2 "A2 缺失 credential.bin → exit 2"
 
 # A3 credential.bin 为空 -> exit 3
@@ -154,7 +154,7 @@ DIR_A3="$TEST_ROOT/case_a3"
 create_profile "$DIR_A3"
 create_cred "$DIR_A3" ""
 RET=0
-HOME="$DIR_A3" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+HOME="$DIR_A3" XDG_CONFIG_HOME="$DIR_A3/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
 assert_eq "${RET:-0}" 3 "A3 密码文件为空 → exit 3"
 
 echo "===== B. 认证结果判定 (真调用 xywdl.sh) ====="
@@ -187,7 +187,7 @@ for item in "${test_cases[@]}"; do
     create_cred "$CASE_DIR"
 
     RET=0
-    HOME="$CASE_DIR" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+    HOME="$CASE_DIR" XDG_CONFIG_HOME="$CASE_DIR/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
     assert_eq "${RET:-0}" "$expect_code" "$desc"
 done
 
@@ -198,7 +198,7 @@ DIR_C1="$TEST_ROOT/case_302"
 create_profile "$DIR_C1"
 create_cred "$DIR_C1"
 RET=0
-HOME="$DIR_C1" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+HOME="$DIR_C1" XDG_CONFIG_HOME="$DIR_C1/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
 assert_ne "${RET:-0}" 0 "C1 302 劫持绝不误判为成功 (exit code != 0)"
 
 # C2 假 200 HTML 页面 -> 不应判为成功 (exit code != 0)
@@ -207,7 +207,7 @@ DIR_C2="$TEST_ROOT/case_fake200"
 create_profile "$DIR_C2"
 create_cred "$DIR_C2"
 RET=0
-HOME="$DIR_C2" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+HOME="$DIR_C2" XDG_CONFIG_HOME="$DIR_C2/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
 assert_ne "${RET:-0}" 0 "C2 假 200 页面绝不误判为成功 (exit code != 0)"
 
 # C3 含 "successfully" 假 200 页面 -> 不应判为成功 (exit code != 0)
@@ -216,7 +216,7 @@ DIR_C3="$TEST_ROOT/case_fake_successfully"
 create_profile "$DIR_C3"
 create_cred "$DIR_C3"
 RET=0
-HOME="$DIR_C3" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+HOME="$DIR_C3" XDG_CONFIG_HOME="$DIR_C3/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
 assert_ne "${RET:-0}" 0 "C3 含 successfully 假 200 页面绝不误判为成功 (exit code != 0)"
 
 echo ""
