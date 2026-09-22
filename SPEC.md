@@ -1,3 +1,7 @@
+﻿> [!IMPORTANT]
+> 本文档写于 v1.x~v2.2 早期, 部分章节已与实现脱节 (v2.2.7 起架构以 src-tauri/src/lib.rs 与 index.html 为准)。
+> 主要差异: 自动检测/重连主循环已移入 Rust 后端状态机; 前端不再轮询; 配置字段以 Config/LoginProfile 结构体为准。
+
 # 校园网自动重连工具 - 规范文档
 
 ## 1. 项目概述
@@ -80,7 +84,6 @@
 - **后端**: Rust
 - **依赖**:
   - `windows` crate: Windows API调用
-  - `ping` crate: ICMP ping
   - `serde_json`: JSON序列化
   - `tokio`: 异步运行时
 
@@ -114,11 +117,11 @@
   - `is_login_configured` → `bool`
   - `get_login_profile` → `Result<LoginProfile>`
   - `save_login_profile(profile, password)` → `Result<()>`
-  - `clear_login_profile` → `Result<()>`
+  - `clear_campus_net_info` → `Result<()>`
   - `parse_portal_url(url)` → `Result<ParsedPortal>`
   - `run_login_with_profile` → `Result<String>`
 - **xywdl.ps1 简化**:从 604 行的 6 个类改为 ~280 行的函数式脚本,只读 JSON + DPAPI 解密 + 发请求。
-- **DPAPI 链路**:Rust 端 `CryptProtectData`(无 entropy)→ `[b"DPAPI" magic + u32 LE 长度 + 密文]`;PS 端 `ProtectedData.Unprotect($null, CurrentUser)` 解密。
+- **DPAPI 链路**:Rust 端 `CryptProtectData`(无 entropy)→ `裸 CryptProtectData 输出 (v1.9.0+ 已去掉 magic 头)`;PS 端 `ProtectedData.Unprotect($null, CurrentUser)` 解密。
 - **不兼容旧 `%APPDATA%/xxgc_campus_net_config.txt`**:首次启动会引导用户重新配置,`clear_campus_net_info` 会同时清理新旧文件。
 
 ### 3.2.z 强健性与防御性净化规范 (v2.0.5+)
@@ -144,7 +147,7 @@
   "backup_ssid": "备用网络名称",
   "check_interval": 15,
   "hotspot_keepalive": false,
-  "test_hosts": ["https://example.com/", "http://connect.rom.miui.com/generate_204"]
+  "check_enabled": true
 }
 ```
 
@@ -170,7 +173,7 @@
 ```
 
 **校园网密码 (v1.9.0+,login_credential.bin)**:
-二进制格式: `b"DPAPI" (4 字节 magic) + u32 LE 长度 (4 字节) + CryptProtectData 输出`。Windows DPAPI CurrentUser scope 加密,仅本机本用户可解密。
+二进制格式: 裸 CryptProtectData 输出 (无 magic 头/无长度头, v1.9.0+ 起)。Windows DPAPI CurrentUser scope 加密,仅本机本用户可解密。
 
 ### 3.4 文件结构
 

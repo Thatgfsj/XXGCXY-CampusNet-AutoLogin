@@ -1,4 +1,9 @@
-﻿# 校园网 Web 认证（Portal Authentication）机制详解
+﻿> [!IMPORTANT]
+> 本文 §1-3 (协议/参数/响应码) 与现实现一致; §4.3 / §5.2 / §6 / §8.4 / §8.5 / §9 描述的是 v1.8.x PowerShell
+> 全权登录时代的旧流程, 仅作历史参考。现行实现: Rust 原生直发 (native_direct_login) + 204 复验, 探针端点为
+> miui/hicloud generate_204, 任何 3xx 一律判 NeedLogin (无关键词白名单)。
+
+# 校园网 Web 认证（Portal Authentication）机制详解
 
 > 本文档讲解xxgcxy校园网的 Portal 认证协议，以及本项目中 PowerShell 脚本的自动化实现原理。
 

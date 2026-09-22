@@ -2,17 +2,20 @@
 # 新乡工程学院校园网登录脚本 (Linux版, v1.9.0+ 简化)
 #
 # 配置文件 (跟 Rust 端 Linux 路径一致):
-#   $HOME/.config/xxgcxy-wifi/login_profile.json  - JSON 元数据 (snake_case)
-#   $HOME/.config/xxgcxy-wifi/login_credential.bin - 密码 (Linux 上是明文,Windows 上是 DPAPI 加密)
+#   ${XDG_CONFIG_HOME:-$HOME/.config}/xxgcxy-wifi/login_profile.json  - JSON 元数据 (snake_case)
+#   ${XDG_CONFIG_HOME:-$HOME/.config}/xxgcxy-wifi/login_credential.bin - 密码 (Linux 上是明文,Windows 上是 DPAPI 加密)
 #
 # 兼容 PS 5.1+ 的 .bin 格式: 本脚本只读明文。
 # Windows 上 .bin 是 DPAPI 加密的, 不能用本脚本。
 # Windows 用户请用 xywdl.bat -> xywdl.ps1。
+#
+# 注意: 本文件必须保持 LF 行尾 (仓库根 .gitattributes 已强制), CRLF 会导致 shebang 带上 \r 无法执行。
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROFILE_DIR="$HOME/.config/xxgcxy-wifi"
+# 与 Rust 端 dirs::config_dir() 一致: 优先 XDG_CONFIG_HOME, 缺省 ~/.config
+PROFILE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/xxgcxy-wifi"
 PROFILE_FILE="$PROFILE_DIR/login_profile.json"
 CRED_FILE="$PROFILE_DIR/login_credential.bin"
 
@@ -201,18 +204,22 @@ REQUEST_URL="${AUTH_URL}?${QUERY}"
 log_info "[*] 步骤 3: 发送..."
 RESPONSE=""
 
+# 临时文件用 mktemp 生成不可预测文件名, 退出时统一清理 (此前固定 /tmp 文件名在多用户/并发下会互相覆盖)
+TMP_RESP="$(mktemp "${TMPDIR:-/tmp}/xywdl_resp.XXXXXX")"
+TMP_PYERR="$(mktemp "${TMPDIR:-/tmp}/xywdl_pyerr.XXXXXX")"
+trap 'rm -f "$TMP_RESP" "$TMP_PYERR"' EXIT
+
 # 第 1 层: curl (默认主力, 带 noproxy 避免系统代理干扰)
 if curl --version >/dev/null 2>&1; then
     log_info "    [L1] curl..."
-    HTTP_CODE=$(curl -s -o /tmp/xywdl_response.txt -w "%{http_code}" \
+    HTTP_CODE=$(curl -s -o "$TMP_RESP" -w "%{http_code}" \
         -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36" \
         -e "${AUTH_URL%/quickauth.do}/portal.do" \
         --max-redirs 0 --noproxy '*' --max-time 6 \
         "$REQUEST_URL" 2>/dev/null || echo "000")
     # 000 = 连接层失败; 4xx/5xx 也算"发出去了", body 交给判定
     if [[ "$HTTP_CODE" != "000" ]]; then
-        RESPONSE=$(cat /tmp/xywdl_response.txt 2>/dev/null || echo "")
-        rm -f /tmp/xywdl_response.txt
+        RESPONSE=$(cat "$TMP_RESP" 2>/dev/null || echo "")
         log_info "    [L1] 成功 (HTTP $HTTP_CODE)"
     else
         log_warn "    [L1] 失败,降级到 L2"
@@ -229,12 +236,10 @@ if [[ -z "$RESPONSE" ]]; then
         PY_SENDER="$SCRIPT_DIR/sender.py"
     fi
     if command -v "$PY_BIN" >/dev/null 2>&1 && [[ -f "$PY_SENDER" ]]; then
-        if RESPONSE=$(printf '%s' "$REQUEST_URL" | "$PY_BIN" "$PY_SENDER" 2>/tmp/xywdl_py_err.txt); then
+        if RESPONSE=$(printf '%s' "$REQUEST_URL" | "$PY_BIN" "$PY_SENDER" 2>"$TMP_PYERR"); then
             log_info "    [L2] 成功"
-            rm -f /tmp/xywdl_py_err.txt
         else
-            PY_ERR=$(cat /tmp/xywdl_py_err.txt 2>/dev/null)
-            rm -f /tmp/xywdl_py_err.txt
+            PY_ERR=$(cat "$TMP_PYERR" 2>/dev/null)
             log_error "[!] $PY_BIN 失败: $PY_ERR"
             exit 99
         fi
@@ -256,8 +261,9 @@ if [[ -z "$RESP_MSG" ]]; then
     RESP_MSG=$( (echo "$RESPONSE" | grep -oE '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/') || echo "" )
 fi
 
-# 判定结果 (严格收口: 仅认 JSON code == "0", 或在无 code 且非 HTML 时整词匹配 success / 认证成功)
-if [[ "$RESP_CODE" == "0" ]] || ( [[ -z "$RESP_CODE" ]] && [[ "$RESPONSE" != *"<html"* && "$RESPONSE" != *"<!DOCTYPE"* ]] && ( echo "$RESPONSE" | grep -qE '(\bsuccess\b|认证成功)' ) ); then
+# 判定结果 (严格收口: 仅认 JSON code == "0", 与 xywdl.ps1 / Rust 端口径一致;
+# 此前多出的"无 code 且非 HTML 时整词匹配 success"宽松分支会在同一响应上与 ps1 得出相反结论, 已删除)
+if [[ "$RESP_CODE" == "0" ]]; then
     log_info "    code=$RESP_CODE  msg=$RESP_MSG"
     log_success "[+] 认证成功"
     exit 0

@@ -46,9 +46,62 @@ fn check_single_instance() -> bool {
             let _ = file.write_all(pid.as_bytes());
             true
         }
-        Err(_) => false,
+        Err(_) => {
+            // 锁文件已存在: 可能是上次崩溃/断电留下的陈旧锁。
+            // 校验其中记录的 PID 是否仍存活, 已死则清理后重试一次, 避免程序永远无法再启动。
+            if let Ok(pid_str) = fs::read_to_string(&lock_path) {
+                if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                    if !pid_alive(pid) {
+                        let _ = fs::remove_file(&lock_path);
+                        if let Ok(mut file) =
+                            fs::OpenOptions::new().create_new(true).write(true).open(&lock_path)
+                        {
+                            let _ = file.write_all(std::process::id().to_string().as_bytes());
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        }
     }
 }
+
+#[cfg(not(windows))]
+fn pid_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{}", pid)).exists()
+}
+
+// ============= 二次启动唤起已运行实例的主窗口 =============
+//
+// 修复: 开机自启后程序隐藏于托盘, 此时用户双击桌面图标, 第二进程因单例互斥体直接静默退出,
+// 主窗口永远弹不出来 (用户感知为"程序没反应")。
+// 方案: 已运行实例持有命名事件并常驻等待; 第二进程 SetEvent 后退出, 由主进程把窗口显示并前置。
+
+#[cfg(windows)]
+const SHOW_EVENT_NAME: &str = "Global\\CampusWifiHelper_ShowWindowEvent";
+
+#[cfg(windows)]
+fn signal_existing_instance() {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::System::Threading::CreateEventW;
+    use windows::Win32::System::Threading::SetEvent;
+
+    let name: Vec<u16> = OsStr::new(SHOW_EVENT_NAME)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        // 事件已存在时返回已运行实例创建的那个句柄; 不存在时本进程即将退出, 无副作用
+        if let Ok(handle) = CreateEventW(None, false, false, windows::core::PCWSTR(name.as_ptr())) {
+            let _ = SetEvent(handle);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn signal_existing_instance() {}
 
 // ============= 兼容 UTF-8 BOM 清洗 =============
 
@@ -83,6 +136,13 @@ pub struct Config {
     pub check_interval: u64,
     #[serde(default)]
     pub hotspot_keepalive: bool,
+    /// 自动保活/断线自愈总开关。缺失时默认开启 (老配置文件兼容)。
+    #[serde(default = "default_true")]
+    pub check_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -92,6 +152,7 @@ impl Default for Config {
             backup_ssid: String::new(),
             check_interval: 15,
             hotspot_keepalive: false,
+            check_enabled: true,
         }
     }
 }
@@ -122,6 +183,8 @@ pub struct CampusNetInfo {
     pub configured: bool,
     pub student_id: String,
     pub operator: String,
+    /// 运营商短码 ("yd" | "lt" | "dx"), 前端徽章着色用; 中文名匹配只是兜底
+    pub operator_code: String,
     pub ssid: String,
 }
 
@@ -247,6 +310,7 @@ fn load_campus_net_info() -> Result<CampusNetInfo, String> {
             configured: false,
             student_id: String::new(),
             operator: String::new(),
+            operator_code: String::new(),
             ssid: String::new(),
         });
     }
@@ -294,6 +358,7 @@ fn load_campus_net_info() -> Result<CampusNetInfo, String> {
         configured: !student_id.is_empty(),
         student_id,
         operator,
+        operator_code,
         ssid,
     })
 }
@@ -469,9 +534,9 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
 
     // 提取 BaseURL: 形如 "http://host:port/portal.do"
     let base_url = {
-        // 简单正则: ^http://[^/]+/\w+\.do
-        // 注意: 这里要保留 scheme (http:// 或 https://), 不然前端会拿到无 scheme 的 host:port/portal.do
-        let lower = decoded.to_lowercase();
+        // 用 to_ascii_lowercase 做大小写不敏感定位: to_lowercase 会改变个别非 ASCII 字符的字节长度,
+        // 导致用 lower 的偏移去切 decoded 时越界 panic
+        let lower = decoded.to_ascii_lowercase();
         if let Some(idx) = lower.find("://") {
             // idx 指向 ':' 位置, :// 是 3 字符, scheme 总长度 = idx + 3
             let scheme_end = idx + 3;
@@ -480,7 +545,7 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
             if let Some(slash_idx) = after_scheme.find('/') {
                 let host_and_path = &after_scheme[slash_idx..];
                 // 找 ".do" 结尾
-                if let Some(do_idx) = host_and_path.to_lowercase().find(".do") {
+                if let Some(do_idx) = host_and_path.to_ascii_lowercase().find(".do") {
                     let end = do_idx + 3;
                     // 用 decoded[..scheme_end + slash_idx + end] 而不是 after_scheme[..] 来保留 scheme
                     decoded[..scheme_end + slash_idx + end].to_string()
@@ -496,6 +561,9 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
     };
 
     // 解析 query string
+    // 关键: 必须在"原始串"上先按 & / = 切分, 再对 key/value 各自解码。
+    // 此前实现先对整个 URL 解码再分割, 值里的 %26 / %3D 会被解成真正的分隔符,
+    // 导致 ssid=A%26B%3DC 被错误切成 ssid=A 和 B=C 两段。
     let mut parsed = ParsedPortal {
         base_url: base_url.clone(),
         wlan_ac_name: String::new(),
@@ -508,20 +576,22 @@ fn parse_portal_url(url: String) -> Result<ParsedPortal, String> {
         rand: String::new(),
     };
 
-    if let Some(q_idx) = decoded.find('?') {
-        let qs = &decoded[q_idx + 1..];
+    if let Some(q_idx) = url.find('?') {
+        let qs = &url[q_idx + 1..];
         for kv in qs.split('&') {
+            if kv.is_empty() {
+                continue;
+            }
             let mut parts = kv.splitn(2, '=');
-            let k = parts.next().unwrap_or("").to_lowercase();
-            let v_raw = parts.next().unwrap_or("");
+            let k = url_decode(parts.next().unwrap_or("")).to_lowercase();
             // portal.do redirect URL 的 query 实际是 form-encoded,
             // + 应该转空格, 用 url_decode_form
-            let v = url_decode_form(v_raw);
+            let v = url_decode_form(parts.next().unwrap_or(""));
             match k.as_str() {
                 "wlanuserip" => parsed.wlan_user_ip = v,
                 "wlanacname" => parsed.wlan_ac_name = v,
                 "wlanacip" => parsed.wlan_ac_ip = v,
-                "mac" => parsed.mac_address = v.to_lowercase(),
+                "mac" => parsed.mac_address = normalize_mac_address(&v),
                 "vlan" => parsed.vlan = v,
                 "hostname" => parsed.hostname = v,
                 "rand" => parsed.rand = v,
@@ -732,6 +802,8 @@ pub struct AppState {
     pub service_status: Mutex<ServiceStatus>,
     pub trigger_tx: tokio::sync::mpsc::Sender<TriggerAction>,
     pub is_logging_in: Arc<tokio::sync::Mutex<()>>,
+    /// WiFi 连接操作互斥: 串行化状态机自动重连与手动连接, 防止 netsh disconnect/connect 互踩
+    pub connect_lock: Arc<tokio::sync::Mutex<()>>,
     pub last_manual_login: Mutex<std::time::Instant>,
 }
 
@@ -744,9 +816,20 @@ fn get_check_enabled(state: tauri::State<'_, AppState>) -> bool {
 
 #[tauri::command]
 fn toggle_check_enabled(state: tauri::State<'_, AppState>) -> bool {
-    let mut enabled = state.check_enabled.lock().unwrap_or_else(|e| e.into_inner());
-    *enabled = !*enabled;
-    *enabled
+    // 顺序加锁 (不嵌套), 持久化到 config.json, 否则重启后开关状态丢失
+    let new_val = {
+        let mut enabled = state.check_enabled.lock().unwrap_or_else(|e| e.into_inner());
+        *enabled = !*enabled;
+        *enabled
+    };
+    {
+        let mut cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
+        cfg.check_enabled = new_val;
+        if let Ok(content) = serde_json::to_string_pretty(&*cfg) {
+            let _ = fs::write(get_config_path(), content);
+        }
+    }
+    new_val
 }
 
 #[tauri::command]
@@ -780,14 +863,40 @@ fn get_autostart_enabled() -> bool {
         use winreg::RegKey;
         use winreg::enums::*;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        if let Ok(key) =
-            hkcu.open_subkey_with_flags("Software\\Microsoft\\Windows\\CurrentVersion\\Run", KEY_READ)
-        {
-            return key.get_value::<String, _>("新乡工程校园网保活").is_ok()
-                || key.get_value::<String, _>("CampusWifiHelper").is_ok()
-                || key.get_value::<String, _>("XXGCXY_WiFi").is_ok();
+        // 需要 KEY_WRITE 以便顺手清理指向已删除 exe 的死条目
+        let key = match hkcu.open_subkey_with_flags(
+            "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+            KEY_READ | KEY_WRITE,
+        ) {
+            Ok(k) => k,
+            Err(_) => return false,
+        };
+        let names = ["新乡工程校园网保活", "CampusWifiHelper", "XXGCXY_WiFi"];
+        let mut any_valid = false;
+        for name in names {
+            let value = match key.get_value::<String, _>(name) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            // 解析 "C:\path\to.exe" --args 形式并校验 exe 是否仍存在;
+            // 升级换目录/卸载残留会让开关永远显示"已开启"而开机实际不起作用
+            let trimmed = value.trim();
+            let exe = if trimmed.starts_with('"') {
+                trimmed.split('"').nth(1).unwrap_or("").to_string()
+            } else {
+                trimmed
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            };
+            if !exe.is_empty() && std::path::Path::new(&exe).exists() {
+                any_valid = true;
+            } else {
+                let _ = key.delete_value(name);
+            }
         }
-        false
+        return any_valid;
     }
     #[cfg(not(windows))]
     {
@@ -998,8 +1107,15 @@ fn load_config(state: tauri::State<'_, AppState>) -> Result<Config, String> {
             fs::read_to_string(&config_path).map_err(|e| format!("读取配置文件失败: {}", e))?;
         let config: Config =
             serde_json::from_str(strip_bom(&content)).map_err(|e| format!("解析配置文件失败: {}", e))?;
-        let mut current_config = state.config.lock().unwrap_or_else(|e| e.into_inner());
-        *current_config = config.clone();
+        {
+            let mut current_config = state.config.lock().unwrap_or_else(|e| e.into_inner());
+            *current_config = config.clone();
+        }
+        // 同步保活开关状态 (此前开关只在内存中, 重启后总是恢复为开启)
+        {
+            let mut enabled = state.check_enabled.lock().unwrap_or_else(|e| e.into_inner());
+            *enabled = config.check_enabled;
+        }
         if !config.primary_ssid.is_empty() {
             let mut first_run = state.first_run.lock().unwrap_or_else(|e| e.into_inner());
             *first_run = false;
@@ -1017,8 +1133,15 @@ fn save_config(config: Config, state: tauri::State<'_, AppState>) -> Result<(), 
         .map_err(|e| format!("序列化配置失败: {}", e))?;
     fs::write(&config_path, content)
         .map_err(|e| format!("写入配置文件失败: {}", e))?;
-    let mut current_config = state.config.lock().unwrap_or_else(|e| e.into_inner());
-    *current_config = config;
+    let check_enabled = config.check_enabled;
+    {
+        let mut current_config = state.config.lock().unwrap_or_else(|e| e.into_inner());
+        *current_config = config;
+    }
+    {
+        let mut enabled = state.check_enabled.lock().unwrap_or_else(|e| e.into_inner());
+        *enabled = check_enabled;
+    }
     let mut first_run = state.first_run.lock().unwrap_or_else(|e| e.into_inner());
     *first_run = false;
     Ok(())
@@ -1026,13 +1149,47 @@ fn save_config(config: Config, state: tauri::State<'_, AppState>) -> Result<(), 
 
 // ============= WiFi 扫描（跨平台） =============
 
+/// 触发无线网卡主动扫描 (netsh 没有 scan 子命令, 此前调用的 `netsh wlan scan` 是无效命令)
+/// `netsh wlan show networks` 只显示上次扫描缓存, 不主动触发会导致设置页列表陈旧/漏网。
+#[cfg(windows)]
+fn trigger_wlan_scan() {
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::NetworkManagement::WiFi::{
+        WlanCloseHandle, WlanEnumInterfaces, WlanFreeMemory, WlanOpenHandle, WlanScan,
+        WLAN_INTERFACE_INFO_LIST,
+    };
+
+    unsafe {
+        let mut negotiated_version = 0u32;
+        let mut client_handle = Default::default();
+        if WlanOpenHandle(2u32, None, &mut negotiated_version, &mut client_handle)
+            != ERROR_SUCCESS.0
+        {
+            return;
+        }
+        let mut list: *mut WLAN_INTERFACE_INFO_LIST = std::ptr::null_mut();
+        if WlanEnumInterfaces(client_handle, None, &mut list) == ERROR_SUCCESS.0 && !list.is_null() {
+            let count = (*list).dwNumberOfItems as usize;
+            let entries = (*list).InterfaceInfo.as_ptr();
+            for i in 0..count {
+                let info = &*entries.add(i);
+                let _ = WlanScan(client_handle, &info.InterfaceGuid, None, None, None);
+            }
+            WlanFreeMemory(list.cast());
+        }
+        let _ = WlanCloseHandle(client_handle, None);
+    }
+}
+
+#[cfg(not(windows))]
+fn trigger_wlan_scan() {}
+
 #[tauri::command]
 async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
     #[cfg(windows)]
     {
-        let _ = hidden_command("netsh")
-            .args(["wlan", "scan"])
-            .output();
+        tokio::task::spawn_blocking(trigger_wlan_scan).await.ok();
+        // 等待驱动完成一次主动扫描, 保证结果新鲜
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         let output = hidden_command("netsh")
             .args(["wlan", "show", "networks", "mode=bssid"])
@@ -1166,8 +1323,10 @@ async fn scan_wifi() -> Result<Vec<WifiNetwork>, String> {
 
 // ============= 连接 WiFi（跨平台） =============
 
-#[tauri::command]
-async fn connect_wifi(ssid: String) -> Result<(), String> {
+/// 实际执行连接 (不含并发控制)。
+/// 独立成内部函数: 状态机自动重连与托盘"手动连接"共用一把 connect_lock 串行化,
+/// 若双方都直接调用带锁的命令包装会因锁不可重入而死锁。
+async fn do_connect_wifi(ssid: String) -> Result<(), String> {
     #[cfg(windows)]
     {
         // 先断开当前连接
@@ -1281,6 +1440,14 @@ async fn connect_wifi(ssid: String) -> Result<(), String> {
             Err(format!("连接 WiFi 失败: {}", stderr))
         }
     }
+}
+
+/// 前端/托盘手动连接入口: 与后端状态机的自动重连共用 connect_lock 串行化。
+/// 此前两条路径并发执行时都会先 netsh wlan disconnect, 互相踢断对方刚建立的连接形成重连风暴。
+#[tauri::command]
+async fn connect_wifi(ssid: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let _guard = state.connect_lock.lock().await;
+    do_connect_wifi(ssid).await
 }
 
 // ============= 获取当前连接的 WiFi（跨平台） =============
@@ -1495,18 +1662,41 @@ pub struct SniffedParams {
 }
 
 /// 将 302 Location URL 解析为 SniffedParams (独立嗅探与"探测即取参"两处共用)
-fn parse_portal_location(loc: &str) -> Option<SniffedParams> {
-    let parsed = url::Url::parse(loc).ok()?;
-    let mut sniffed = SniffedParams::default();
-    let mut base = parsed.clone();
-    base.set_query(None);
-    base.set_fragment(None);
-    sniffed.base_url = Some(base.to_string());
+/// MAC 地址归一化: 网关/浏览器复制可能下发 `aa-bb-cc-dd-ee-ff` 形式,
+/// 统一转为小写冒号分隔 —— 与 is_dummy_mac 校验格式及 PS 端 (-replace '[-]',':') 对齐,
+/// 否则 dash 形式 MAC 会被误判为假 MAC 触发安全拦截, 登录永远失败。
+fn normalize_mac_address(raw: &str) -> String {
+    raw.trim().to_lowercase().replace('-', ":")
+}
 
-    for (k, v) in parsed.query_pairs() {
+fn parse_portal_location(loc: &str) -> Option<SniffedParams> {
+    let mut sniffed = SniffedParams::default();
+
+    // 绝对 URL 走标准解析; 相对 Location (如 "/portal.do?x=1") 无法直接 parse,
+    // 此前会整体丢弃参数 —— 网关下发相对路径时改用手动截取 query 兜底
+    let query = match url::Url::parse(loc) {
+        Ok(parsed) => {
+            let mut base = parsed.clone();
+            base.set_query(None);
+            base.set_fragment(None);
+            sniffed.base_url = Some(base.to_string());
+            parsed.query().map(|q| q.to_string())
+        }
+        Err(_) => {
+            let q_idx = loc.find('?')?;
+            let raw_q = loc[q_idx + 1..].split('#').next().unwrap_or("");
+            if raw_q.is_empty() {
+                None
+            } else {
+                Some(raw_q.to_string())
+            }
+        }
+    }?;
+
+    for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
         match k.to_ascii_lowercase().as_str() {
             "wlanuserip" => sniffed.wlan_user_ip = Some(v.to_string()),
-            "mac" => sniffed.mac_address = Some(v.to_string()),
+            "mac" => sniffed.mac_address = Some(normalize_mac_address(&v)),
             "vlan" => sniffed.vlan = Some(v.to_string()),
             "wlanacname" => sniffed.wlan_ac_name = Some(v.to_string()),
             "wlanacip" => sniffed.wlan_ac_ip = Some(v.to_string()),
@@ -1865,53 +2055,55 @@ fn decode_console_output(bytes: &[u8]) -> String {
 fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
     #[cfg(windows)]
     {
-        let mut ssid = None;
-        let mut mac = None;
-        let mut iface_name = "WLAN".to_string();
-
-        if let Ok(output) = hidden_command("netsh").args(["wlan", "show", "interfaces"]).output() {
-            let stdout = decode_console_output(&output.stdout);
-            for line in stdout.lines() {
-                let line = line.trim();
-                if (line.starts_with("Name") || line.starts_with("名称")) && line.contains(':') {
-                    if let Some(val) = line.splitn(2, ':').nth(1) {
-                        let n = val.trim();
-                        if !n.is_empty() { iface_name = n.to_string(); }
-                    }
-                } else if (line.starts_with("Physical address") || line.starts_with("物理地址")) && line.contains(':') {
-                    if let Some(val) = line.splitn(2, ':').nth(1) {
-                        let m = val.trim().replace('-', ":").to_lowercase();
-                        if !m.is_empty() { mac = Some(m); }
-                    }
-                } else if line.starts_with("SSID") && !line.starts_with("BSSID") && line.contains(':') {
-                    if let Some(val) = line.splitn(2, ':').nth(1) {
-                        let s = val.trim().to_string();
-                        if !s.is_empty() { ssid = Some(s); }
-                    }
-                }
-            }
-        }
-
-        let mut ip = None;
-        if let Ok(output) = hidden_command("netsh").args(["interface", "ipv4", "show", "addresses", &iface_name]).output() {
-            let stdout = decode_console_output(&output.stdout);
-            for line in stdout.lines() {
-                let line = line.trim();
-                if (line.starts_with("IP Address") || line.starts_with("IP 地址") || line.starts_with("IPv4 地址")) && line.contains(':') {
-                    if let Some(val) = line.splitn(2, ':').nth(1) {
-                        let addr = val.trim().to_string();
-                        if !addr.is_empty() && !addr.starts_with("169.254") && addr != "127.0.0.1" {
-                            ip = Some(addr);
-                            break;
+        // netsh wlan show interfaces 为每个 WLAN 接口输出一个块 (名称/物理地址/SSID...),
+        // 必须按块解析并选取"已连接 SSID"的那一块; 此前"最后出现的值获胜"的写法在
+        // 有线 + 无线或多 WLAN 接口并存时会取到未连接网卡的 MAC, 甚至把有线网卡 IP 发给网关
+        let mut target_iface: Option<String> = None;
+        let mut target_mac: Option<String> = None;
+        let mut target_ssid: Option<String> = None;
+        {
+            let mut cur_name = String::new();
+            let mut cur_mac: Option<String> = None;
+            if let Ok(output) = hidden_command("netsh").args(["wlan", "show", "interfaces"]).output() {
+                let stdout = decode_console_output(&output.stdout);
+                for line in stdout.lines() {
+                    let line = line.trim();
+                    if (line.starts_with("Name") || line.starts_with("名称")) && line.contains(':') {
+                        if let Some(val) = line.splitn(2, ':').nth(1) {
+                            let n = val.trim();
+                            if !n.is_empty() {
+                                cur_name = n.to_string();
+                                cur_mac = None;
+                            }
+                        }
+                    } else if (line.starts_with("Physical address") || line.starts_with("物理地址")) && line.contains(':') {
+                        if let Some(val) = line.splitn(2, ':').nth(1) {
+                            let m = normalize_mac_address(val);
+                            if !m.is_empty() { cur_mac = Some(m); }
+                        }
+                    } else if line.starts_with("SSID") && !line.starts_with("BSSID") && line.contains(':') {
+                        if let Some(val) = line.splitn(2, ':').nth(1) {
+                            let s = val.trim().to_string();
+                            if !s.is_empty() {
+                                // 该块已连接到网络: 记录块名 / 块 MAC / SSID (多块时以最后一块为准)
+                                target_iface = Some(cur_name.clone());
+                                target_mac = cur_mac.clone();
+                                target_ssid = Some(s);
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 兜底：若按网卡名未查询到 IP，遍历所有 IPv4 地址寻找非回环、非保留的首个活动 IP
-        if ip.is_none() {
-            if let Ok(output) = hidden_command("netsh").args(["interface", "ipv4", "show", "addresses"]).output() {
+        // 只查询"已连接 SSID 的那块无线网卡"的 IP; 不再做"任意适配器"全局兜底 ——
+        // 有线/虚拟网卡 (VMware 等) 并存时兜底几乎必然取错 IP, 发给网关会认证拒绝/会话错绑
+        let mut ip = None;
+        if let Some(iface) = &target_iface {
+            if let Ok(output) = hidden_command("netsh")
+                .args(["interface", "ipv4", "show", "addresses", iface])
+                .output()
+            {
                 let stdout = decode_console_output(&output.stdout);
                 for line in stdout.lines() {
                     let line = line.trim();
@@ -1928,7 +2120,7 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
             }
         }
 
-        (ssid, mac, ip)
+        (target_ssid, target_mac, ip)
     }
     #[cfg(not(windows))]
     {
@@ -1938,6 +2130,25 @@ fn get_wlan_network_info() -> (Option<String>, Option<String>, Option<String>) {
 
 async fn get_wlan_network_info_async() -> (Option<String>, Option<String>, Option<String>) {
     tokio::task::spawn_blocking(get_wlan_network_info).await.unwrap_or((None, None, None))
+}
+
+/// 认证请求错误脱敏: reqwest 0.11 错误的 Display 会携带完整请求 URL
+/// (含 passwd= 等明文认证参数), 直接落盘 backend 日志或广播告警等于泄漏密码。
+/// 只保留错误类别, 严禁把原始错误串写进任何持久化输出。
+fn sanitize_request_error(e: reqwest::Error) -> String {
+    if e.is_timeout() {
+        "网络请求失败: 连接/响应超时".to_string()
+    } else if e.is_connect() {
+        "网络请求失败: 无法连接到认证服务器".to_string()
+    } else if e.is_body() || e.is_decode() {
+        let code = e
+            .status()
+            .map(|s| s.as_u16().to_string())
+            .unwrap_or_else(|| "无状态码".to_string());
+        format!("网络请求失败: 响应读取异常 ({})", code)
+    } else {
+        "网络请求失败: 请求未能完成".to_string()
+    }
 }
 
 /// 进程内异步直发认证请求 (零外部脚本依赖，毫秒级响应)
@@ -2069,7 +2280,7 @@ async fn native_direct_login(pre_sniffed: Option<SniffedParams>) -> Result<Strin
         .header("X-Requested-With", "XMLHttpRequest")
         .send()
         .await
-        .map_err(|e| format!("网络请求失败: {}", e))?;
+        .map_err(sanitize_request_error)?;
 
     let elapsed = start_instant.elapsed().as_millis();
 
@@ -2078,7 +2289,10 @@ async fn native_direct_login(pre_sniffed: Option<SniffedParams>) -> Result<Strin
         return Err(format!("认证未通过: 网关返回重定向状态码 {}", resp.status()));
     }
 
-    let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let body = resp
+        .text()
+        .await
+        .map_err(|_| "网络请求失败: 认证服务器响应读取异常".to_string())?;
 
     // 解析 JSON 响应
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
@@ -2188,15 +2402,15 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
         .unwrap_or_else(|_| PathBuf::from("."));
 
     #[cfg(windows)]
-    let possible_bat_paths: Vec<PathBuf> = vec![
-        exe_dir.join("xywdl.bat"),
-        exe_dir.join("_up_").join("xywdl.bat"),
+    let possible_ps1_paths: Vec<PathBuf> = vec![
+        exe_dir.join("xywdl.ps1"),
+        exe_dir.join("_up_").join("xywdl.ps1"),
         app.path()
             .resource_dir()
-            .map(|p| p.join("xywdl.bat"))
+            .map(|p| p.join("xywdl.ps1"))
             .unwrap_or_default(),
         std::env::current_dir()
-            .map(|p| p.join("xywdl.bat"))
+            .map(|p| p.join("xywdl.ps1"))
             .unwrap_or_default(),
     ];
 
@@ -2214,7 +2428,7 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     ];
 
     #[cfg(windows)]
-    let script_path = possible_bat_paths
+    let script_path = possible_ps1_paths
         .into_iter()
         .find(|p| p.exists())
         .ok_or_else(|| format!("登录脚本不存在 (exe目录: {})", exe_dir.display()))?;
@@ -2228,15 +2442,22 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
     #[cfg(windows)]
     {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let mut cmd = tokio::process::Command::new(&script_path);
+        // 直接运行 powershell 执行 ps1 (跳过 bat 中转): 经 bat 调用时 kill_on_drop 只能杀掉
+        // cmd.exe 包装进程, 超时后会留下孤儿 powershell 继续发认证请求 / 重连 WiFi。
+        // 脚本自身用 [Console]::OutputEncoding 输出 UTF-8, 无需 bat 的 chcp 65001。
+        let mut cmd = tokio::process::Command::new("powershell");
         cmd.creation_flags(CREATE_NO_WINDOW);
         cmd.kill_on_drop(true);
+        cmd.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]);
+        cmd.arg(&script_path);
         cmd.arg("--non-interactive");
 
-        let output = match tokio::time::timeout(std::time::Duration::from_secs(15), cmd.output()).await {
+        // 60 秒总预算: 脚本在 WiFi 断开时会做最长 15 秒重连轮询 + 8 秒 portal 探测,
+        // 此前 15 秒硬超时会在这些分支把兜底流程中途击杀, 把用户留在断网状态
+        let output = match tokio::time::timeout(std::time::Duration::from_secs(60), cmd.output()).await {
             Ok(Ok(out)) => out,
             Ok(Err(e)) => return Err(format!("执行登录脚本失败: {}", e)),
-            Err(_) => return Err("执行登录脚本超时 (15 秒)，已中止以防挂起".to_string()),
+            Err(_) => return Err("执行登录脚本超时 (60 秒)，已中止以防挂起".to_string()),
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -2266,10 +2487,10 @@ async fn run_login_script(app: AppHandle) -> Result<String, String> {
             .args(["-c", &format!("chmod +x '{}' && '{}' --non-interactive", script_str, script_str)])
             .output();
 
-        let output = match tokio::time::timeout(std::time::Duration::from_secs(15), cmd_future).await {
+        let output = match tokio::time::timeout(std::time::Duration::from_secs(60), cmd_future).await {
             Ok(Ok(out)) => out,
             Ok(Err(e)) => return Err(format!("执行登录脚本失败: {}", e)),
-            Err(_) => return Err("执行登录脚本超时 (15 秒)，已中止以防挂起".to_string()),
+            Err(_) => return Err("执行登录脚本超时 (60 秒)，已中止以防挂起".to_string()),
         };
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -2310,6 +2531,8 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
     let mut consecutive_business_errors: u32 = 0;
     let mut next_retry_instant: Option<std::time::Instant> = None;
     let mut transport_cooldown_until: Option<std::time::Instant> = None;
+    // 自动重连冷却: 连接失败后 60 秒内不反复 netsh 连接, 防止重连风暴干扰用户
+    let mut reconnect_cooldown_until: Option<std::time::Instant> = None;
     let mut last_error_reason: String = String::new();
     let mut fast_recheck_pending = false; // 登录成功后下一轮等待缩短为 3 秒, 尽快 204 复验 Connected
 
@@ -2337,6 +2560,12 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
 
         // 传输层失败 (超时/连接重置等) 60 秒冷却: 未到期则跳过本轮自动登录, 防止高频轰炸认证服务器触发限流
         let transport_cooldown_active = if let Some(until) = transport_cooldown_until {
+            now < until
+        } else {
+            false
+        };
+
+        let reconnect_cooldown_active = if let Some(until) = reconnect_cooldown_until {
             now < until
         } else {
             false
@@ -2377,23 +2606,18 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                 (has_cfg, matches)
             };
 
-            if wifi.is_none() || (has_configured_ssid && !connected_matches) {
-                // WiFi 未连接或 SSID 不匹配
-                emit_service_status(&app, &ServiceStatus {
-                    state: ServiceState::Disconnected,
-                    wifi_connected: wifi.clone(),
-                    internet_ok: has_internet,
-                    last_check_time: timestamp_now,
-                    consecutive_business_errors,
-                    backoff_remaining_secs,
-                });
-            } else if has_internet {
+            // 目标网络判定: 未配置 SSID 时视为任意连接都匹配; 配置后要求当前连接为主/备之一
+            let wifi_is_target = wifi.is_some() && (!has_configured_ssid || connected_matches);
+
+            if wifi_is_target && has_internet {
                 // 互联网畅通，重置业务退避计数器
                 if consecutive_business_errors > 0 || next_retry_instant.is_some() {
                     consecutive_business_errors = 0;
                     next_retry_instant = None;
                     last_error_reason.clear();
                 }
+                // 已在目标网络上恢复在线, 解除自动重连冷却
+                reconnect_cooldown_until = None;
                 emit_service_status(&app, &ServiceStatus {
                     state: ServiceState::Connected,
                     wifi_connected: wifi.clone(),
@@ -2402,6 +2626,117 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                     consecutive_business_errors: 0,
                     backoff_remaining_secs: 0,
                 });
+            } else if !wifi_is_target {
+                // 未连接到配置的校园网 WiFi。分两种情况:
+                if has_internet {
+                    // 当前连的是其他可用网络 (如手机热点/办公网): 外网畅通, 不抢占用户连接
+                    if consecutive_business_errors > 0 || next_retry_instant.is_some() {
+                        consecutive_business_errors = 0;
+                        next_retry_instant = None;
+                        last_error_reason.clear();
+                    }
+                    emit_service_status(&app, &ServiceStatus {
+                        state: ServiceState::Connected,
+                        wifi_connected: wifi.clone(),
+                        internet_ok: true,
+                        last_check_time: timestamp_now,
+                        consecutive_business_errors: 0,
+                        backoff_remaining_secs: 0,
+                    });
+                } else if has_configured_ssid && !reconnect_cooldown_active {
+                    // 断网状态: 按设置页配置的主/备 SSID 自动重连 (核心修复: 此前只上报 Disconnected 从不连接)
+                    emit_service_status(&app, &ServiceStatus {
+                        state: ServiceState::Checking,
+                        wifi_connected: wifi.clone(),
+                        internet_ok: false,
+                        last_check_time: timestamp_now,
+                        consecutive_business_errors,
+                        backoff_remaining_secs: 0,
+                    });
+                    emit_backend_log(&app, "[*] 未连接到配置的校园网 WiFi，开始自动重连...");
+
+                    let mut candidates: Vec<String> = Vec::new();
+                    {
+                        let state = app.state::<AppState>();
+                        let cfg = state.config.lock().unwrap_or_else(|e| e.into_inner());
+                        for ssid in [&cfg.primary_ssid, &cfg.backup_ssid] {
+                            let ssid = ssid.trim();
+                            if !ssid.is_empty()
+                                && !candidates.iter().any(|c| c.eq_ignore_ascii_case(ssid))
+                            {
+                                candidates.push(ssid.to_string());
+                            }
+                        }
+                    }
+
+                    let mut connected_ok: Option<String> = None;
+                    {
+                        // 与手动连接 (connect_wifi 命令) 共用互斥:
+                        // 连接内部会先 netsh disconnect, 并发执行会互相踢断对方的连接
+                        let lock_state = app.state::<AppState>();
+                        let _guard = lock_state.connect_lock.lock().await;
+                        for ssid in candidates {
+                            emit_backend_log(&app, &format!("[*] 自动重连: 正在连接 {}", ssid));
+                            if let Err(e) = do_connect_wifi(ssid.clone()).await {
+                                emit_backend_log(&app, &format!("[!] 连接 {} 失败: {}", ssid, e));
+                                continue;
+                            }
+                            // netsh connect 是异步指令, 复核当前真实连接的 SSID
+                            if let Some(cur) = get_connected_wifi_async().await {
+                                if cur.eq_ignore_ascii_case(&ssid) {
+                                    connected_ok = Some(ssid);
+                                    break;
+                                }
+                            }
+                            emit_backend_log(&app, &format!("[!] 连接 {} 未生效", ssid));
+                        }
+                    }
+
+                    match connected_ok {
+                        Some(ok) => {
+                            reconnect_cooldown_until = None;
+                            // 3 秒后快速复验: 走探测 -> 认证 -> 204 复验链路
+                            fast_recheck_pending = true;
+                            emit_backend_log(&app, &format!("[+] 已自动重连到 {}，即将自动认证", ok));
+                            emit_service_status(&app, &ServiceStatus {
+                                state: ServiceState::Checking,
+                                wifi_connected: Some(ok),
+                                internet_ok: false,
+                                last_check_time: timestamp_now,
+                                consecutive_business_errors,
+                                backoff_remaining_secs: 0,
+                            });
+                        }
+                        None => {
+                            reconnect_cooldown_until = Some(
+                                std::time::Instant::now() + std::time::Duration::from_secs(60),
+                            );
+                            emit_backend_log(
+                                &app,
+                                "[!] 自动重连失败，60 秒后随下一轮检测再试 (防连接风暴)",
+                            );
+                            let wifi_now = get_connected_wifi_async().await;
+                            emit_service_status(&app, &ServiceStatus {
+                                state: ServiceState::Disconnected,
+                                wifi_connected: wifi_now,
+                                internet_ok: false,
+                                last_check_time: timestamp_now,
+                                consecutive_business_errors,
+                                backoff_remaining_secs: 0,
+                            });
+                        }
+                    }
+                } else {
+                    // 未配置 SSID, 或重连冷却未到期: 仅上报断线状态
+                    emit_service_status(&app, &ServiceStatus {
+                        state: ServiceState::Disconnected,
+                        wifi_connected: wifi.clone(),
+                        internet_ok: false,
+                        last_check_time: timestamp_now,
+                        consecutive_business_errors,
+                        backoff_remaining_secs: 0,
+                    });
+                }
             } else {
                 // WiFi 已就绪但外网不通 -> 需认证
                 if in_backoff {
@@ -2527,6 +2862,17 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                 match action {
                     Some(TriggerAction::Check) => {
                         emit_backend_log(&app, "[*] 收到立即检测信号");
+                        // 自动检测被关闭时状态机不会自发探测, 这里补发当前状态,
+                        // 否则前端"立即检测"会把雷达环置为旋转态后永远无人纠正
+                        if !check_enabled {
+                            let snapshot = app
+                                .state::<AppState>()
+                                .service_status
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .clone();
+                            emit_service_status(&app, &snapshot);
+                        }
                     }
                     Some(TriggerAction::Login) => {
                         emit_backend_log(&app, "[*] 收到手动立即登录信号，重置退避计时器");
@@ -2545,6 +2891,35 @@ async fn start_background_service(app: AppHandle, mut rx: tokio::sync::mpsc::Rec
                         let login_res = execute_login_flow(&app, None).await;
                         // 立即广播登录结果状态, 避免 UI 等到下一个检测周期才刷新
                         emit_login_result_status(&app, &login_res).await;
+                        // 把手动登录的失败结果镜像进状态机本地计数器:
+                        // 此前只更新了 UI 状态, 状态机仍按完整周期继续自发认证, "保护性退避"形同虚设
+                        if let Err(e) = &login_res {
+                            if e.starts_with("BUSINESS_REJECTED") {
+                                // 与 emit_login_result_status 共用共享状态里的计数, 保证 UI 与状态机一致
+                                let consecutive = app
+                                    .state::<AppState>()
+                                    .service_status
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .consecutive_business_errors;
+                                consecutive_business_errors = consecutive;
+                                let backoff_secs = match consecutive {
+                                    1 => 15,
+                                    2 => 30,
+                                    3 => 60,
+                                    4 => 120,
+                                    _ => 300,
+                                };
+                                next_retry_instant = Some(
+                                    std::time::Instant::now() + std::time::Duration::from_secs(backoff_secs),
+                                );
+                                last_error_reason = e.clone();
+                            } else {
+                                transport_cooldown_until = Some(
+                                    std::time::Instant::now() + std::time::Duration::from_secs(60),
+                                );
+                            }
+                        }
                     }
                     Some(TriggerAction::ResetBackoff) => {
                         consecutive_business_errors = 0;
@@ -2635,6 +3010,9 @@ pub fn run() {
     }
 
     if !check_single_instance() {
+        // 已有实例在运行 (例如开机自启后驻留托盘): 唤起其主窗口后退出当前进程,
+        // 否则用户双击图标只会被静默吞掉, 窗口永远弹不出来
+        signal_existing_instance();
         return;
     }
 
@@ -2655,12 +3033,13 @@ pub fn run() {
     let is_first_run = initial_config.primary_ssid.is_empty();
 
     let app_state = AppState {
-        config: Mutex::new(initial_config),
+        config: Mutex::new(initial_config.clone()),
         first_run: Mutex::new(is_first_run),
-        check_enabled: Mutex::new(true),
+        check_enabled: Mutex::new(initial_config.check_enabled),
         service_status: Mutex::new(ServiceStatus::default()),
         trigger_tx: trigger_tx.clone(),
         is_logging_in: Arc::new(tokio::sync::Mutex::new(())),
+        connect_lock: Arc::new(tokio::sync::Mutex::new(())),
         last_manual_login: Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(10)),
     };
 
@@ -2688,6 +3067,43 @@ pub fn run() {
             )?;
 
             setup_tray(app.handle())?;
+
+            // 监听"唤起主窗口"命名事件: 二次启动进程检测到单例互斥体后 SetEvent 并退出,
+            // 由本进程把隐藏在托盘的主窗口显示并前置 (配合 signal_existing_instance)
+            let handle_for_show = app.handle().clone();
+            std::thread::spawn(move || {
+                #[cfg(windows)]
+                {
+                    use std::ffi::OsStr;
+                    use std::os::windows::ffi::OsStrExt;
+                    use windows::Win32::System::Threading::{
+                        CreateEventW, WaitForSingleObject, INFINITE,
+                    };
+
+                    let name: Vec<u16> = OsStr::new(SHOW_EVENT_NAME)
+                        .encode_wide()
+                        .chain(std::iter::once(0))
+                        .collect();
+                    let event = match unsafe {
+                        CreateEventW(None, false, false, windows::core::PCWSTR(name.as_ptr()))
+                    } {
+                        Ok(h) => h,
+                        Err(_) => return,
+                    };
+                    loop {
+                        unsafe { WaitForSingleObject(event, INFINITE) };
+                        if let Some(window) = handle_for_show.get_webview_window("main") {
+                            let _ = window.unminimize();
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = handle_for_show;
+                }
+            });
 
             if let Some(window) = app.get_webview_window("main") {
                 let window_clone = window.clone();

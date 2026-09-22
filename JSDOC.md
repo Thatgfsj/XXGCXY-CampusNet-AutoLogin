@@ -1,3 +1,8 @@
+﻿> [!IMPORTANT]
+> v2.2.7 起架构有重大变更: 自动检测/重连主循环已完全移入 Rust 后端状态机 (start_background_service),
+> 前端 checkNetwork 轮询已删除; 断线自动重连、手动连接互斥 (connect_lock)、开关持久化、二次启动唤起窗口均为后端行为。
+> 本文档 §5.2 前端轮询相关章节为历史描述。
+
 # XXGCXY-CampusNet-AutoLogin — 完整技术文档
 
 ## 1. 项目概述
@@ -334,13 +339,16 @@ needs_login = wifi_connected.is_some()                       // WiFi 已连接
 |---------|------|------|------|
 | `load_config` | — | `Result<Config>` | 从磁盘加载配置 |
 | `save_config` | `config: Config` | `Result<()>` | 保存配置到磁盘 |
-| `scan_wifi` | — | `Result<Vec<WifiNetwork>>` | 扫描可用 WiFi |
-| `connect_wifi` | `ssid: String` | `Result<()>` | 连接指定 WiFi |
+| `scan_wifi` | — | `Result<Vec<WifiNetwork>>` | 扫描可用 WiFi (原生 WlanScan 主动触发扫描) |
+| `connect_wifi` | `ssid: String` | `Result<()>` | 连接指定 WiFi (与自动重连共用 connect_lock 互斥) |
 | `check_network` | — | `Result<NetworkStatus>` | 综合网络状态检测 |
 | `run_login_script` | — | `Result<String>` | 执行登录脚本(兼容旧版本) |
-| `get_check_enabled` | — | `bool` | 获取自动检测开关状态 |
-| `toggle_check_enabled` | — | `bool` | 切换自动检测开关 |
-| `get_autostart_enabled` | — | `bool` | 获取开机自启状态 |
+| `get_check_enabled` | — | `bool` | 获取自动检测开关状态 (v2.2.7 起持久化到 config.json) |
+| `toggle_check_enabled` | — | `bool` | 切换自动检测开关 (v2.2.7 起持久化) |
+| `get_service_status` | — | `ServiceStatus` | **(v2.2.x+)** 读取后端保活状态机当前状态快照 |
+| `trigger_manual_check` | — | `Result<()>` | **(v2.2.x+)** 触发状态机立即执行一轮探测 (托盘/主页"立即检测") |
+| `trigger_manual_login` | — | `Result<()>` | **(v2.2.x+)** 触发状态机立即执行一次认证 (3 秒节流) |
+| `get_autostart_enabled` | — | `bool` | 获取开机自启状态 (v2.2.7 起校验注册表指向的 exe 是否存在, 死条目自动清理) |
 | `set_autostart_enabled` | `enabled: bool` | `Result<()>` | 设置开机自启 |
 | `get_hotspot_keepalive` | — | `bool` | **(v2.0.8+)** 获取保持移动热点常开状态 |
 | `set_hotspot_keepalive` | `enabled: bool` | `Result<bool>` | **(v2.0.8+)** 设置保持移动热点常开并激活 |

@@ -135,7 +135,12 @@ function Load-LoginProfile {
         # 拿到字段名 (兼容 hashtable 和 PSCustomObject)
         $fieldNames = if ($json -is [hashtable]) { $json.Keys } else { $json.PSObject.Properties.Name }
 
-        $required = @("user_id", "operator", "base_url", "vlan")
+        $required = @("user_id", "base_url", "vlan")
+        # operator 是纯展示字段 (user_id 已含运营商后缀, 认证参数不含它), 缺失只提示不阻断:
+        # 与 Rust 端保存校验口径对齐 —— 此前 Rust 能保存无 operator 的 profile、脚本兜底却必挂 (exit 2)
+        if (-not ($fieldNames -contains "operator") -or [string]::IsNullOrWhiteSpace($json.operator)) {
+            Write-Host "[*] profile 缺少 operator 字段 (仅影响日志显示, 不影响认证)" -ForegroundColor DarkYellow
+        }
         # wlan_user_ip / mac_address / ssid 是可选的: UI 允许留空,
         # 运行时由 Get-WifiIpAddress() / Get-WirelessMacAddress() / Get-CurrentSsid() 自动取本地值兜底
         foreach ($f in $required) {

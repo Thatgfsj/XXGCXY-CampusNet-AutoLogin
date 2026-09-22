@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -31,6 +31,18 @@
             padding: 0;
             box-sizing: border-box;
             user-select: none;
+        }
+
+        /* 通用隐藏类: setupScreen/loginConfigScreen 容器与 advancedContent 折叠面板都依赖它,
+           缺失时高级参数面板会永远展开且折叠按钮失效 (UI 错乱根因) */
+        .hidden {
+            display: none !important;
+        }
+
+        /* 全局 user-select:none 会连带禁用输入框内的文本选区, 密码/URL 编辑不便 */
+        input, textarea {
+            user-select: text;
+            -webkit-user-select: text;
         }
 
         body {
@@ -884,7 +896,7 @@
             <div class="app-brand">
                 <div class="app-logo-badge">📶</div>
                 <div class="app-title-group">
-                    <h1>校园网助手 <span class="app-ver-pill" id="appVersionPill">v2.2.5</span></h1>
+                    <h1>校园网助手 <span class="app-ver-pill" id="appVersionPill">v2.2.7</span></h1>
                 </div>
             </div>
             <button class="header-btn" onclick="showSetup()">
@@ -919,11 +931,6 @@
                     <span class="pill-label">自愈检测周期</span>
                     <span class="pill-val"><span id="intervalDisplay">15</span> 秒</span>
                 </div>
-                <div class="network-pill" style="display:none;">
-                    <!-- 保持原有 ID 兼容数据绑定 -->
-                    <span id="primaryWifi">-</span>
-                    <span id="backupWifi">-</span>
-                </div>
             </div>
         </div>
 
@@ -942,7 +949,6 @@
             <button class="profile-edit-btn" id="changeAccountBtn" onclick="showLoginConfig(false)">
                 ✏️ 更改
             </button>
-            <button id="clearCampusInfoBtn" onclick="clearCampusInfo()" style="display: none;"></button>
         </div>
 
         <!-- 智能保活与自启开关组 -->
@@ -1000,7 +1006,7 @@
 
         <!-- 底部版权与 GitHub -->
         <div class="footer">
-            <a href="#" onclick="openGithub()" class="github-link">
+            <a href="#" onclick="openGithub(); return false;" class="github-link">
                 <span>🔗</span> GitHub: XXGCXY-CampusNet-AutoLogin
             </a>
         </div>
@@ -1156,12 +1162,9 @@
         let selectedBackup = '';
         let autoCheckEnabled = true;
         let hotspotKeepaliveEnabled = false;
-        let checkIntervalId = null;
-        let isLoggingIn = false;  // 防止重复登录
-        let lastLoginTime = 0;    // 上次登录时间
         
         // 应用版本号: 以 tauri.conf.json 的 version 为唯一事实源, 运行时通过 getVersion() 动态获取。
-        // HTML 中的静态 "v2.2.5" 仅作为纯浏览器环境(API 调用失败)下的兜底显示。
+        // HTML 中的静态版本号仅作为纯浏览器环境(API 调用失败)下的兜底显示。
         async function initAppVersion() {
             try {
                 const version = await getVersion();
@@ -1224,24 +1227,28 @@
                 console.log('监听后端事件失败:', e);
             }
 
-            // 监听托盘菜单事件
-            await listen('check_network', async () => {
-                addLog('托盘菜单触发：立即检测');
-                const gauge = document.getElementById('gaugeCard');
-                if (gauge) {
-                    gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected');
-                    gauge.classList.add('state-checking');
-                }
-                document.getElementById('statusIcon').textContent = '⏳';
-                document.getElementById('statusText').textContent = '检测中...';
-            });
-            await listen("manual_connect_wifi", async () => {
-                addLog("托盘菜单触发：手动连接");
-                await manualWifiConnect();
-            });
-            await listen("run_login", async () => {
-                addLog("托盘菜单触发：直接执行登录");
-            });
+            // 监听托盘菜单事件 (任一 listen 失败不应拖垮整个初始化, 否则下面的定时器不会启动)
+            try {
+                await listen('check_network', async () => {
+                    addLog('托盘菜单触发：立即检测');
+                    const gauge = document.getElementById('gaugeCard');
+                    if (gauge) {
+                        gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected');
+                        gauge.classList.add('state-checking');
+                    }
+                    document.getElementById('statusIcon').textContent = '⏳';
+                    document.getElementById('statusText').textContent = '检测中...';
+                });
+                await listen("manual_connect_wifi", async () => {
+                    addLog("托盘菜单触发：手动连接");
+                    await manualWifiConnect();
+                });
+                await listen("run_login", async () => {
+                    addLog("托盘菜单触发：直接执行登录");
+                });
+            } catch (e) {
+                console.log('注册托盘事件监听失败:', e);
+            }
 
             // 启动轻量辅助定时器 (退避倒计时刷新 & 移动热点守护)
             startCheckInterval();
@@ -1322,6 +1329,14 @@
                     text.className = 'status-text';
                 }
                 if (detail) detail.textContent = 'Rust 后端状态机探测中...';
+            } else if (stateType === 'Idle') {
+                if (gauge) gauge.classList.add('state-checking');
+                if (icon) icon.textContent = '⏳';
+                if (text) {
+                    text.textContent = '正在启动守护...';
+                    text.className = 'status-text';
+                }
+                if (detail) detail.textContent = '后端状态机初始化中，即将开始首次探测';
             } else {
                 if (gauge) gauge.classList.add('state-disconnected');
                 if (icon) icon.textContent = '⚡';
@@ -1333,23 +1348,10 @@
             }
         }
         
-        // 启动辅助定时器 (UI 秒数递减与热点 30 秒独立定时保活)
+        // 启动辅助定时器
+        // 状态/退避刷新已完全由后端 service-status-changed 事件驱动 (后端退避期间每 1~5 秒广播真实剩余值),
+        // 此前本地每秒 -1 的递减与真实值交错导致数字来回跳变, 已移除; 这里只保留热点守护定时器的调度入口
         function startCheckInterval() {
-            if (checkIntervalId) {
-                clearInterval(checkIntervalId);
-            }
-            checkIntervalId = setInterval(() => {
-                if (currentBackendStatus && currentBackendStatus.backoff_remaining_secs > 0) {
-                    currentBackendStatus.backoff_remaining_secs -= 1;
-                    const text = document.getElementById('statusText');
-                    const stateObj = currentBackendStatus.state;
-                    const stateType = typeof stateObj === 'string' ? stateObj : (stateObj && stateObj.type ? stateObj.type : '');
-                    if (text && stateType === 'Backoff') {
-                        text.textContent = `保护性退避等待 (${currentBackendStatus.backoff_remaining_secs}s)`;
-                    }
-                }
-            }, 1000);
-
             startHotspotInterval();
         }
 
@@ -1374,9 +1376,13 @@
         async function toggleAutoCheck() {
             try {
                 autoCheckEnabled = await invoke('toggle_check_enabled');
+                // 同步本地 config 快照: 否则此后"保存网络配置"会把旧开关值写回磁盘, 静默回滚用户设置
+                config.check_enabled = autoCheckEnabled;
                 addLog(autoCheckEnabled ? '已开启自动检测' : '已关闭自动检测');
             } catch (e) {
                 addLog('切换检测开关失败: ' + e);
+                // 恢复开关状态
+                document.getElementById('autoCheckToggle').checked = !document.getElementById('autoCheckToggle').checked;
             }
         }
         window.toggleAutoCheck = toggleAutoCheck;
@@ -1402,6 +1408,7 @@
                 const enabled = checkbox.checked;
                 hotspotKeepaliveEnabled = await invoke('set_hotspot_keepalive', { enabled: enabled });
                 checkbox.checked = hotspotKeepaliveEnabled;
+                config.hotspot_keepalive = hotspotKeepaliveEnabled;
                 addLog(hotspotKeepaliveEnabled ? '[+] 已开启保持移动热点开启（自动防休眠拉起）' : '[-] 已关闭保持移动热点开启');
                 if (hotspotKeepaliveEnabled) {
                     startHotspotInterval();
@@ -1415,6 +1422,9 @@
                             } else if (res && res.includes('ACTIVE:On')) {
                                 addLog('[+] 移动热点当前已处于开启就绪状态');
                             }
+                        } catch (e) {
+                            // 首次拉起失败不应回退开关: 后端已持久化开启, 30 秒定时器会继续自动重试
+                            addLog('[!] 首次热点拉起失败 (守护保持开启, 30 秒后自动重试): ' + e);
                         } finally {
                             isCheckingHotspot = false;
                         }
@@ -1457,11 +1467,8 @@
         
         // 更新网络信息显示
         function updateNetworkInfo() {
-            document.getElementById('primaryWifi').textContent = config.primary_ssid || '未设置';
-            document.getElementById('backupWifi').textContent = config.backup_ssid || '未设置';
             document.getElementById('intervalDisplay').textContent = config.check_interval;
             document.getElementById('intervalInput').value = config.check_interval;
-
         }
         
         // 移动热点守护执行函数
@@ -1492,188 +1499,24 @@
             }
         }
 
-        // 检测网络状态
-        async function checkNetwork(isManual = false) {
-            // 如果正在登录，跳过检测
-            if (isLoggingIn) {
-                return;
-            }
-            
-            try {
-                const status = await invoke('check_network');
-                updateStatus(status);
-                
-                // 如果网络正常，重置登录状态并执行移动热点守护
-                if (status.internet_ok) {
-                    isLoggingIn = false;
-                    if (isManual) {
-                        addLog('[+] 网络连接正常（已连通外网）');
-                    }
-                    await runHotspotKeepaliveCheck(isManual);
-                    return;
-                }
-                
-                if (status.needs_reconnect) {
-                    addLog('检测到断网，开始重连...');
-                    await reconnectWifi();
-                    // 重连后重新检测网络状态
-                    await sleep(3000);
-                    const retryStatus = await invoke('check_network');
-                    updateStatus(retryStatus);
-                    if (retryStatus.internet_ok) {
-                        addLog('重连后网络已恢复正常');
-                        await runHotspotKeepaliveCheck(isManual);
-                        return;
-                    }
-                    if (retryStatus.needs_login || (!retryStatus.internet_ok && retryStatus.wifi_connected)) {
-                        const now = Date.now();
-                        if (isManual || now - lastLoginTime >= 4000) {
-                            addLog('[*] 重连后需要登录校园网，正在执行登录...');
-                            await runLoginScript();
-                        }
-                    } else if (retryStatus.wifi_connected) {
-                        // WiFi已连接但无法获取IP或网络尚未就绪
-                        addLog('WiFi已连接，等待网络就绪...');
-                        await sleep(3000);
-                        const finalStatus = await invoke('check_network');
-                        updateStatus(finalStatus);
-                    }
-                    return;
-                }
-                
-                if (status.needs_login || (!status.internet_ok && status.wifi_connected)) {
-                    const now = Date.now();
-                    if (!isManual && now - lastLoginTime < 4000) {
-                        console.log('刚登录过，冷却中');
-                        return;
-                    }
-                    addLog('[*] 检测到需要校园网 Web 认证，正在发起登录...');
-                    await runLoginScript();
-                    return;
-                }
-            } catch (e) {
-                addLog('检测网络失败: ' + e);
-            }
-        }
-        
         // 更新状态显示
+        // (自动检测/重连主循环已移至 Rust 后端状态机, 前端只负责渲染)
+        // 统一委托给 handleBackendStatusChanged 分类渲染: 此前这里只有三态分类,
+        // 会把后端真实状态 (Backoff/LoggingIn/Checking) 覆盖成错误的粗分类
         function updateStatus(status) {
-            const gauge = document.getElementById('gaugeCard');
-            const icon = document.getElementById('statusIcon');
-            const text = document.getElementById('statusText');
-            const detail = document.getElementById('statusDetail');
-            const currentWifi = document.getElementById('currentWifi');
-            
-            currentWifi.textContent = status.wifi_connected || '未连接 WiFi';
-            
-            if (gauge) {
-                gauge.classList.remove('state-connected', 'state-needs-login', 'state-disconnected', 'state-checking');
-            }
-
-            if (status.internet_ok) {
-                if (gauge) gauge.classList.add('state-connected');
-                icon.textContent = '✓';
-                text.textContent = '网络已认证连接';
-                text.className = 'status-text';
-                detail.textContent = '校园网畅通 · 全天候自动保活守护中';
-            } else if (status.wifi_connected) {
-                if (gauge) gauge.classList.add('state-needs-login');
-                icon.textContent = '🔐';
-                text.textContent = '需要 Portal 认证';
-                text.className = 'status-text';
-                detail.textContent = `已连接「${status.wifi_connected}」，待校园网 Web 认证`;
-            } else {
-                if (gauge) gauge.classList.add('state-disconnected');
-                icon.textContent = '⚡';
-                text.textContent = 'WiFi 网络已断开';
-                text.className = 'status-text';
-                detail.textContent = '未检测到可用校园网连接';
-            }
-        }
-        
-        // 重新连接WiFi（含信号强度比较逻辑）
-        async function reconnectWifi() {
-            let connectedSsid = null;
-
-            if (!config.primary_ssid) {
-                addLog('未配置主网络');
-                return;
-            }
-
-            // 扫描网络，获取信号强度
-            let signalPrimary = 0;
-            let signalBackup = 0;
-            try {
-                const networks = await invoke('scan_wifi');
-                for (const net of networks) {
-                    if (net.ssid === config.primary_ssid) signalPrimary = net.signal;
-                    if (net.ssid === config.backup_ssid) signalBackup = net.signal;
-                }
-                addLog(`信号强度 — 主: ${signalPrimary}%  备用: ${signalBackup}%`);
-            } catch (e) {
-                addLog('扫描WiFi失败: ' + e);
-            }
-
-            // 决定连接顺序：主网络信号<40%且备用信号更高 → 先用备用
-            const useBackupFirst = config.backup_ssid
-                && signalPrimary < 40
-                && signalBackup > signalPrimary;
-
-            const firstSsid = useBackupFirst ? config.backup_ssid : config.primary_ssid;
-            const secondSsid = useBackupFirst ? config.primary_ssid : config.backup_ssid;
-
-            if (useBackupFirst) {
-                addLog(`主网络信号弱(${signalPrimary}%)，优先连接备用: ${firstSsid}`);
-            }
-
-            // 尝试连接第一个网络
-            addLog('正在连接: ' + firstSsid);
-            try {
-                await invoke('connect_wifi', { ssid: firstSsid });
-                await sleep(4000);
-
-                const status = await invoke('check_network');
-                if (status.wifi_connected === firstSsid) {
-                    addLog('已连接到: ' + firstSsid);
-                    connectedSsid = firstSsid;
-                }
-            } catch (e) {
-                addLog(`连接 ${firstSsid} 失败: ` + e);
-            }
-
-            // 第一个没连上，尝试第二个
-            if (!connectedSsid && secondSsid) {
-                addLog('正在连接: ' + secondSsid);
-                try {
-                    await invoke('connect_wifi', { ssid: secondSsid });
-                    await sleep(4000);
-
-                    const status = await invoke('check_network');
-                    if (status.wifi_connected === secondSsid) {
-                        addLog('已连接到: ' + secondSsid);
-                        connectedSsid = secondSsid;
-                    }
-                } catch (e) {
-                    addLog(`连接 ${secondSsid} 失败: ` + e);
-                }
-            }
-
-            // WiFi连接成功后，检查是否需要登录
-            if (connectedSsid) {
-                addLog('WiFi已连接，检查网络状态...');
-                const status = await invoke('check_network');
-                if (status.needs_login) {
-                    addLog('需要登录校园网，正在执行登录...');
-                    await runLoginScript();
-                } else if (status.internet_ok) {
-                    addLog('网络正常，无需登录');
-                }
-            } else {
-                addLog('WiFi连接失败，请检查网络设置');
-            }
+            const stateType = status.internet_ok
+                ? 'Connected'
+                : (status.wifi_connected ? 'NeedsLogin' : 'Disconnected');
+            handleBackendStatusChanged({
+                state: { type: stateType },
+                wifi_connected: status.wifi_connected || null,
+                internet_ok: !!status.internet_ok,
+                backoff_remaining_secs: 0
+            });
         }
         
         // 手动连接WiFi（仅连接，不自动登录）
+        // (托盘"手动连接"入口专用; 断线自动重连由后端状态机按配置的主/备 SSID 自动执行)
         async function manualWifiConnect() {
             let connectedSsid = null;
 
@@ -1737,23 +1580,16 @@
 
             if (connectedSsid) {
                 addLog("WiFi连接成功");
-                const status = await invoke("check_network");
-                updateStatus(status);
+                try {
+                    const status = await invoke("check_network");
+                    updateStatus(status);
+                } catch (e) {
+                    addLog("获取网络状态失败: " + e);
+                }
             } else {
                 addLog("WiFi连接失败，请检查网络设置");
             }
         }
-        
-        // 运行登录 (优先由 Rust 后端原生直发并复验)
-        async function runLoginScript() {
-            try {
-                addLog('[*] 正在触发认证流程...');
-                await invoke('trigger_manual_login');
-            } catch (e) {
-                addLog('[!] 触发登录失败: ' + e);
-            }
-        }
-        window.runLoginScript = runLoginScript;
         
         // 立即检测 (由 Rust 后端核心状态机探测)
         async function checkNow() {
@@ -1844,6 +1680,11 @@
             document.getElementById('setupScreen').classList.add('hidden');
             document.getElementById('loginConfigScreen').classList.add('hidden');
             document.getElementById('mainScreen').classList.remove('hidden');
+            // 返回主屏时立即同步后端最新状态: 否则最长要等一个检测周期才刷新,
+            // 且旧页面里显示的状态可能已被设置页的探测覆盖成过期分类
+            invoke('get_service_status')
+                .then(s => handleBackendStatusChanged(s))
+                .catch(() => {});
         }
         window.showMain = showMain;
 
@@ -1922,12 +1763,9 @@
         // 取消登录配置
         function cancelLoginConfig() {
             if (isFirstRunSetup) {
-                // 首次启动跳过 → 直接进主页
-                addLog('已跳过登录配置,可在主页随时点击"登录（更换）"按钮重新配置');
-                showMain();
-            } else {
-                showMain();
+                addLog('已跳过登录配置,可随时在主页点击"✏️ 更改"按钮重新配置');
             }
+            showMain();
         }
         window.cancelLoginConfig = cancelLoginConfig;
 
@@ -1937,10 +1775,10 @@
             const toggle = document.getElementById('advancedToggle');
             if (content.classList.contains('hidden')) {
                 content.classList.remove('hidden');
-                toggle.textContent = '▼ 高级字段(SSID / AC 名称 / VLAN 等)';
+                toggle.textContent = '▼ 高级网络参数 (AC 名称 / VLAN / IP / MAC)';
             } else {
                 content.classList.add('hidden');
-                toggle.textContent = '▶ 高级字段(SSID / AC 名称 / VLAN 等)';
+                toggle.textContent = '▶ 高级网络参数 (AC 名称 / VLAN / IP / MAC)';
             }
         }
         window.toggleAdvanced = toggleAdvanced;
@@ -2257,6 +2095,8 @@
             
             // 获取检测间隔
             let interval = parseInt(document.getElementById('intervalInput').value);
+            // 输入框清空时 parseInt 返回 NaN, 两个 clamp 比较对 NaN 均为 false, 会把 null 传给后端 u64 导致保存失败
+            if (!Number.isFinite(interval)) interval = 15;
             if (interval < 5) interval = 5;
             if (interval > 300) interval = 300;
             

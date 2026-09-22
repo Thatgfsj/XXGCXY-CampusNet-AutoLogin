@@ -27,6 +27,16 @@ config.json
 # Binary
 campus-wifi.exe
 
+# Rust/链接实验产物 (v2.2.7 清理: 此前 21.9MB 调试二进制曾误入库)
+*.pdb
+*.obj
+*.rcgu.o
+src-tauri/.cargo/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
 # Windows pwsh bundle - PS7 portable is committed to src-tauri/bin/_pw7_/
 # Ignore unpacked/build artifacts but not the committed PS7
 src-tauri/bin/_pw7_.unpacked/

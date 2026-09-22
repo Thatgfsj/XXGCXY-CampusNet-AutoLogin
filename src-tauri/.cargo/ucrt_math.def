@@ -1,4 +1,0 @@
-LIBRARY ucrtbase.dll
-EXPORTS
-    trunc
-    round

@@ -1,0 +1,14 @@
+# 强制 shell 脚本使用 LF: CRLF 会让 shebang 变成 "#!/bin/bash\r" 导致 Linux 上无法执行
+*.sh text eol=lf
+*.py text eol=lf
+
+# Windows 侧脚本保持 CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制文件不做任何转换
+*.exe binary
+*.dll binary
+*.png binary
+*.ico binary
+*.icns binary
