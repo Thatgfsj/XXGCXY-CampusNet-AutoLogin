@@ -3423,6 +3423,9 @@ mod tests {
         assert!(!is_valid_portal_base_url("ftp://172.18.252.12/portal.do"));
     }
 
+    // GBK 解码分支仅存在于 Windows (netsh 是 Windows 命令), 非 Windows 平台按设计走 lossy 直通,
+    // 此测试在 Linux CI 上必然失败, 故按平台门控
+    #[cfg(windows)]
     #[test]
     fn test_decode_console_output_gbk() {
         // 中文 Windows 下 netsh 的 stdout 为 GBK 编码, 必须正确解码 "物理地址" 等中文标签
