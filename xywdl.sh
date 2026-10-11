@@ -90,6 +90,36 @@ VERSION=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.
 BIND_CTRL_ID=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('bind_ctrl_id',''))")
 HOSTNAME_VAL=$(echo "$PROFILE_JSON" | "$PY_BIN" -c "import sys,json; d=json.load(sys.stdin); print(d.get('hostname',''))")
 
+# ---- base_url 自带参数提纯（必须在必填校验之前，才能救回 vlan / wlanacname）----
+# CLI 用户常把认证页整条 URL 直接粘进 base_url，此时 wlanacname / vlan 已在 query 里；
+# 而下一步原实现就把 query 整段丢弃 (cut -d'?')，于是出现“参数明明带着、脚本却报缺字段
+# 或送空值”的情况。这里只填充缺失字段，已显式配置的字段一律不覆盖。
+if [[ -n "$BASE_URL" && "$BASE_URL" == *"?"* ]]; then
+    URL_ARGS=$(BASE_URL="$BASE_URL" "$PY_BIN" -c '
+import os, shlex, urllib.parse as up
+qs = up.parse_qs(up.urlsplit(os.environ["BASE_URL"]).query)
+def g(*names):
+    for n in names:
+        v = qs.get(n)
+        if v and v[0]:
+            return up.unquote(v[0])
+    return ""
+vals = {"U_AC_NAME": g("wlanacname"), "U_AC_IP": g("wlanacIp", "wlanacip"),
+        "U_SSID": g("ssid"), "U_VLAN": g("vlan")}
+print(" ".join("%s=%s" % (k, shlex.quote(v)) for k, v in vals.items()))
+' 2>/dev/null || echo "")
+    if [[ -n "$URL_ARGS" ]]; then
+        eval "$URL_ARGS"
+        if [[ -z "$WLAN_AC_NAME" ]]; then WLAN_AC_NAME="${U_AC_NAME:-}"; fi
+        if [[ -z "$WLAN_AC_IP" ]]; then WLAN_AC_IP="${U_AC_IP:-}"; fi
+        if [[ -z "$SSID" ]]; then SSID="${U_SSID:-}"; fi
+        if [[ -z "$VLAN" ]]; then VLAN="${U_VLAN:-}"; fi
+        if [[ -n "${U_AC_NAME:-}" || -n "${U_AC_IP:-}" ]]; then
+            log_warn "    [✓] 已从 base_url 参数提纯: wlan_ac_name=${U_AC_NAME:-}, wlan_ac_ip=${U_AC_IP:-}, vlan=${U_VLAN:-}"
+        fi
+    fi
+fi
+
 # 校验必需字段
 # mac_address / wlan_user_ip 是可选的: UI 允许留空, 运行时由本机自动取兜底
 for f in "user_id:$USER_ID" "base_url:$BASE_URL" "vlan:$VLAN"; do
