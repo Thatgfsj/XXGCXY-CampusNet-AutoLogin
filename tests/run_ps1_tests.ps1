@@ -265,6 +265,25 @@ if ($mockRecords.Count -gt 0) {
     Assert-True (-not $lastReq.query.Contains("??")) "F1 请求不含双重问号" "query='$($lastReq.query)'"
 }
 
+# F1b: 脏 BaseURL 且 wlan_ac_name / vlan 留空 → 必须从 query 提纯后才能认证成功
+#      (F1 只覆盖“URL 净化不破坏参数”, 本例覆盖“参数只能从 URL 里捞回来”这条兜底路)
+$AppData = New-CaseAppData "case_f1b"
+$prof1b = New-TestProfile -BaseUrl $dirtyUrl -Overrides @{ wlan_ac_name = ""; vlan = "" }
+($prof1b | ConvertTo-Json) |
+    Set-Content -Path (Join-Path $AppData "xxgcxy-wifi\login_profile.json") -Encoding UTF8
+Write-CredentialBin (Join-Path $AppData "xxgcxy-wifi\login_credential.bin") "TestPass123"
+$r = Invoke-Xywdl -AppData $AppData
+Assert-True ($r.ExitCode -eq 0) "F1b 脏 URL + 空 AC/VLAN → 提纯后认证成功" "exit=$($r.ExitCode)"
+Start-Sleep -Milliseconds 400
+$records1b = @()
+if (Test-Path $mock0Log) { $records1b = @(Get-Content $mock0Log -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json }) }
+$req1b = @($records1b | Where-Object { $_.path -like "*quickauth.do" })
+if ($req1b.Count -gt 0) {
+    $q1b = $req1b[-1]
+    Assert-True ($q1b.params.wlanacname -eq "AuteWifi-XXGC") "F1b wlanacname 由 URL 提纯补回" "wlanacname='$($q1b.params.wlanacname)'"
+    Assert-True ($q1b.params.vlan -eq "31002201") "F1b vlan 由 URL 提纯补回" "vlan='$($q1b.params.vlan)'"
+}
+
 # F2: 真实 AC 错误响应: {"code":"1","rec":null,"message":"设备不在正常状态,无法认证上网,请稍后",...}
 $AppData = New-CaseAppData "case_f2"
 (New-TestProfile -BaseUrl "http://127.0.0.1:18088/portal.do" | ConvertTo-Json) |

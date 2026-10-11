@@ -219,6 +219,66 @@ RET=0
 HOME="$DIR_C3" XDG_CONFIG_HOME="$DIR_C3/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
 assert_ne "${RET:-0}" 0 "C3 含 successfully 假 200 页面绝不误判为成功 (exit code != 0)"
 
+echo "===== D. base_url 自带参数提纯 (CLI 直接粘贴整条认证 URL) ====="
+# 提纯必须发生在必填校验之前：否则脏 URL 场景下脚本连请求都发不出去 (exit 2)
+DIRTY_URL="http://127.0.0.1:$PORT/portal.do?wlanuserip=10.4.124.192&wlanacname=AuteWifi-XXGC&mac=f4:6a:dd:e5:4a:7b&vlan=31002201&hostname=TEST-PC&rand=100bd08f91d44a1&url=http%3A%2F%2Fwww.qq.com"
+echo "0" > "$CODEFILE"
+
+# assert_eq 用的是 -eq 数值比较, 字符串参数必须走这条
+assert_str() {
+    local got="$1"
+    local want="$2"
+    local name="$3"
+    if [ "$got" = "$want" ]; then
+        PASS=$((PASS + 1))
+        echo "  [PASS] $name"
+    else
+        FAIL=$((FAIL + 1))
+        FAILURES+=("$name (got=$got, want=$want)")
+        echo "  [FAIL] $name got=$got want=$want"
+    fi
+}
+
+# 只取 mock 记录里最后一条 quickauth.do 请求的指定参数 (排除嗅探请求干扰)
+get_mock_param() {
+    $PYTHON -c "
+import json, sys
+rs = []
+for line in open(sys.argv[1], encoding='utf-8'):
+    line = line.strip()
+    if line:
+        rs.append(json.loads(line))
+qs = [r for r in rs if str(r.get('path', '')).endswith('quickauth.do')]
+rec = qs[-1] if qs else (rs[-1] if rs else {})
+print((rec.get('params') or {}).get(sys.argv[2], ''))
+" "$(to_native_path "$MOCK_LOG")" "$1" 2>/dev/null || echo ""
+}
+
+# D1 脏 base_url + profile 的 vlan / wlan_ac_name / wlan_ac_ip 全空 -> 提纯后应认证成功
+#    (vlan 必须用 sed 清空: create_profile 的 ${4:-100} 对空串仍会回落成 100)
+DIR_D1="$TEST_ROOT/case_dirty_url"
+create_profile "$DIR_D1" "$DIRTY_URL"
+sed -i.bak 's|"wlan_ac_name": "XXGC-AC"|"wlan_ac_name": ""|; s|"wlan_ac_ip": "172.18.252.1"|"wlan_ac_ip": ""|; s|"vlan": "100"|"vlan": ""|' "$DIR_D1/.config/xxgcxy-wifi/login_profile.json"
+grep -q '"vlan": ""' "$DIR_D1/.config/xxgcxy-wifi/login_profile.json" || echo "  [WARN] D1 profile 清空失败，用例会失真"
+create_cred "$DIR_D1"
+: > "$MOCK_LOG"
+RET=0
+HOME="$DIR_D1" XDG_CONFIG_HOME="$DIR_D1/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+assert_eq "${RET:-0}" 0 "D1 脏 URL + 空 vlan/wlan_ac_name → 提纯后认证成功"
+assert_str "$(get_mock_param wlanacname)" "AuteWifi-XXGC" "D1 wlanacname 由 URL 提纯补回"
+assert_str "$(get_mock_param vlan)" "31002201" "D1 vlan 由 URL 提纯补回"
+
+# D2 显式配置优先: profile 已写 vlan=4000 / wlan_ac_name=XXGC-AC 时, URL 参数不得覆盖
+DIR_D2="$TEST_ROOT/case_dirty_url_conflict"
+create_profile "$DIR_D2" "$DIRTY_URL" "2021110101@xxgcyd" "4000"
+create_cred "$DIR_D2"
+: > "$MOCK_LOG"
+RET=0
+HOME="$DIR_D2" XDG_CONFIG_HOME="$DIR_D2/.config" bash "$XYWDL_SH" >/dev/null 2>&1 || RET=$?
+assert_eq "${RET:-0}" 0 "D2 显式配置场景仍认证成功"
+assert_str "$(get_mock_param vlan)" "4000" "D2 显式 vlan 未被 URL 参数覆盖"
+assert_str "$(get_mock_param wlanacname)" "XXGC-AC" "D2 显式 wlan_ac_name 未被覆盖"
+
 echo ""
 echo "===== 结果: $PASS 通过, $FAIL 失败 ====="
 if [ $FAIL -gt 0 ]; then

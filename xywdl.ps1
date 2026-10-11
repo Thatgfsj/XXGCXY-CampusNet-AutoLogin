@@ -135,6 +135,42 @@ function Load-LoginProfile {
         # 拿到字段名 (兼容 hashtable 和 PSCustomObject)
         $fieldNames = if ($json -is [hashtable]) { $json.Keys } else { $json.PSObject.Properties.Name }
 
+        # ============= base_url 自带 query 提纯 (必须排在必填校验之前) =============
+        # CLI 用户常把认证页整条 URL 直接粘进 base_url, wlanacname / vlan 其实已在 query 里;
+        # 而构造请求时 base_url 会被 Split('?') 截断, Get-AutoPortalParams 又只能从 302
+        # Location 提取 —— 遇到直回 200 且无 Location 的 AC (本机 nginx/1.25.1 即如此),
+        # 两条兜底路同时失效: 要么报“缺少字段 vlan”, 要么带空 wlanacname 被 AC 拒 (code=1)。
+        # 与 xywdl.sh 同口径: 只填充缺失字段, 已显式配置过的一律不覆盖。
+        $rawBase = if ($json -is [hashtable]) { [string]$json["base_url"] } else { [string]$json.base_url }
+        $qIdx = $rawBase.IndexOf('?')
+        if ($qIdx -ge 0) {
+            $qStr = $rawBase.Substring($qIdx + 1)
+            $hIdx = $qStr.IndexOf('#')
+            if ($hIdx -ge 0) { $qStr = $qStr.Substring(0, $hIdx) }
+            $picked = @{}
+            foreach ($kv in $qStr.Split('&')) {
+                if ([string]::IsNullOrWhiteSpace($kv)) { continue }
+                $parts = $kv.Split('=', 2)
+                if ($parts.Count -ne 2) { continue }
+                $pk = [System.Uri]::UnescapeDataString($parts[0]).ToLower()
+                $pv = [System.Uri]::UnescapeDataString($parts[1])
+                switch ($pk) {
+                    "wlanacname" { $picked["wlan_ac_name"] = $pv }
+                    "wlanacip"   { $picked["wlan_ac_ip"]   = $pv }
+                    "vlan"       { $picked["vlan"]         = $pv }
+                    "ssid"       { $picked["ssid"]         = $pv }
+                }
+            }
+            foreach ($pk in @($picked.Keys)) {
+                $cur = if ($json -is [hashtable]) { $json[$pk] } else { $json.$pk }
+                if (-not [string]::IsNullOrWhiteSpace([string]$cur)) { continue }
+                if ($json -is [hashtable]) { $json[$pk] = $picked[$pk] }
+                else { $json | Add-Member -NotePropertyName $pk -NotePropertyValue $picked[$pk] -Force }
+                if ($fieldNames -notcontains $pk) { $fieldNames = @($fieldNames) + $pk }
+                Write-Host "    [OK] 已从 base_url 参数提纯: $pk = $($picked[$pk])" -ForegroundColor Cyan
+            }
+        }
+
         $required = @("user_id", "base_url", "vlan")
         # operator 是纯展示字段 (user_id 已含运营商后缀, 认证参数不含它), 缺失只提示不阻断:
         # 与 Rust 端保存校验口径对齐 —— 此前 Rust 能保存无 operator 的 profile、脚本兜底却必挂 (exit 2)
