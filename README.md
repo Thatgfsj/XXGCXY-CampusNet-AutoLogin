@@ -132,6 +132,12 @@ npx @tauri-apps/cli build
 
 ## 更新日志
 
+- **v2.2.8**：**双平台 CLI 脚本补齐 base_url 参数提纯，回归用例对等加固**（未发布）：
+  1. **`xywdl.sh` / `xywdl.ps1` 新增 base_url 自带 query 提纯**：CLI 用户习惯把认证页整条 URL 直接粘进 `base_url`，`wlanacname` / `wlanacIp` / `vlan` / `ssid` 其实就在 query 里，而两个脚本都会在构造请求时用 `cut -d'?'` / `Split('?')` 把 query 整段丢弃；此前唯一兜底是 302 `Location` 嗅探（PS 端 `Get-AutoPortalParams`、SH 端探测块），遇到直回 200、不下发 `Location` 的 AC 时两条路同时失效——要么 `exit 2` 报“登录配置缺少字段: vlan”且一个请求都发不出去，要么带空 `wlanacname` 认证被 AC 拒（实机返回 `code=1 设备不在正常状态,无法认证上网`）。提纯排在必填校验之前（否则救不回 `vlan`），且只填充缺失字段、已显式配置的一律不覆盖；UI 侧的 `parsePortalUrl` 自动提纯此前只覆盖图形端，本次把同等能力补齐到纯脚本路径；
+  2. **实机佐证**：`172.18.252.12:6060`（nginx/1.25.1）对 `/portal.do` 直回 `HTTP 200` 无 `Location`，`wlanacname=AuteWifi-XXGC`、`vlan=31002201` 只能从粘贴的 URL 中提取，提纯后 `code=0` 认证成功；
+  3. **测试套件对等加固**：`tests/test_sh_judge.sh` 新增 D 组 6 项（D1 脏 URL + 空 `vlan`/`wlan_ac_name` 必须提纯成功、D2 显式配置不得被 URL 参数覆盖），并补 `assert_str` 字符串断言（原 `assert_eq` 走 `-eq` 数值比较，比较字符串会报 `integer expression expected`）；`tests/run_ps1_tests.ps1` 新增 F1b 3 项（原 F1 的 profile 各字段均有默认值，从未覆盖“参数只能从 URL 里捞回”这条兜底路）。反向验证：剥掉提纯块后 D1 三项立即 FAIL（`exit 2`），确认用例真能抓住该回归而非空转；
+  4. **测试计数**：PowerShell 脚本测试 38→41 项、sh 判定测试 20→26 项，CI `test-windows` / `test-linux` 双平台全绿。
+
 - **v2.2.7**：**断线自动重连落地、UI 状态源统一与认证链路安全性修复**：
   1. **断线自动重连真正生效（核心修复）**：此前前后端都没有实际执行 WiFi 重连的代码——前端重连逻辑成了死代码、后端状态机检测到断线只广播 Disconnected 从不连接，设置页选择的"主/备 WiFi"形同虚设。现在状态机在断网且未连接配置网络时按主/备 SSID 自动重连（60 秒防风暴冷却），成功后 3 秒快速复验并自动认证；
   2. **UI 错乱根因修复**：CSS 缺失通用 `.hidden` 规则导致登录配置页"高级网络参数"面板永远展开、折叠按钮失效；双状态源互相覆盖（手动探测的三态分类会冲掉后端五态状态）；退避倒计时本地递减与后端真实值交错跳变；窗口 800px 高度在 768p 笔记本上必然溢出（调整为 700/最小 560）；
