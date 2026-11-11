@@ -1,4 +1,4 @@
-﻿# XXGCXY-CampusNet-AutoLogin
+# XXGCXY-CampusNet-AutoLogin
 
 新乡工程学院校园网自动登录助手 —— 基于 Tauri 2.x 的 Windows / Linux 桌面应用，自动检测 / 重连校园网 WiFi 并完成 Portal 认证登录。
 
@@ -53,6 +53,7 @@
 - **开机自启** — 可选的开机自动启动
 - **凭证加密存储** — 密码通过 Windows DPAPI 加密, 不存明文
 - **中文界面** — 安装包和 UI 均支持简体中文
+- **Linux 轻量 GTK4 界面 (`linux-ui/`, v2.3.0+)** — 不装 WebKit / 不编译 Tauri 也能用：纯 Python + PyGObject 单窗口，自动保活、断线重连、开机自启、日志分级，配置与桌面端共用 `~/.config/xxgcxy-wifi/`；详见 [linux-ui/README.md](./linux-ui/README.md)
 
 ## 安装
 
@@ -80,10 +81,22 @@ chmod +x xywdl.sh
 ./xywdl.sh     # 需要 curl 或 python3 (登录请求发送会自动选择可用的一层)
 ```
 
+### Linux 轻量界面（可选）
+
+不想装 WebKit / 编译 Rust？`linux-ui/` 提供纯 Python + GTK4 的保活小窗（自动认证、15s 保活、断线重连、开机自启、日志），配置目录与桌面端共用：
+
+```bash
+cd linux-ui
+./install.sh        # 复制到 ~/.local/share/xxgcxy-wifi-ui 并创建应用菜单/桌面图标
+```
+
+详见 [linux-ui/README.md](./linux-ui/README.md)。
+
 ## 项目结构
 
 ```
 ├── index.html              # 前端界面 (HTML/CSS/JS)
+├── linux-ui/               # Linux 轻量 GTK4 界面 (Python, 可选)
 ├── package.json            # Node.js 依赖
 ├── xywdl.ps1               # 校园网认证脚本 (PowerShell)
 ├── xywdl.bat               # Windows 启动器（找系统 pwsh / powershell）
